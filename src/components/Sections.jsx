@@ -154,10 +154,81 @@ export function DressCode() {
 }
 
 /* ════════════════════════════════
+   LIVE WEATHER — Open-Meteo
+   Shirdi: lat 19.7827, lon 74.4856
+════════════════════════════════ */
+// WMO weather code → human label + emoji
+function parseWeather(code, isDay) {
+  const map = {
+    0:  { label: "Clear Sky",       emoji: isDay ? "☀️" : "🌙" },
+    1:  { label: "Mostly Clear",    emoji: isDay ? "🌤️" : "🌙" },
+    2:  { label: "Partly Cloudy",   emoji: "⛅" },
+    3:  { label: "Overcast",        emoji: "☁️" },
+    45: { label: "Foggy",           emoji: "🌫️" },
+    48: { label: "Icy Fog",         emoji: "🌫️" },
+    51: { label: "Light Drizzle",   emoji: "🌦️" },
+    53: { label: "Drizzle",         emoji: "🌦️" },
+    55: { label: "Heavy Drizzle",   emoji: "🌧️" },
+    61: { label: "Light Rain",      emoji: "🌧️" },
+    63: { label: "Rain",            emoji: "🌧️" },
+    65: { label: "Heavy Rain",      emoji: "🌧️" },
+    80: { label: "Rain Showers",    emoji: "🌦️" },
+    81: { label: "Rain Showers",    emoji: "🌦️" },
+    82: { label: "Heavy Showers",   emoji: "⛈️" },
+    95: { label: "Thunderstorm",    emoji: "⛈️" },
+    96: { label: "Thunderstorm",    emoji: "⛈️" },
+    99: { label: "Thunderstorm",    emoji: "⛈️" },
+  };
+  return map[code] || { label: "Clear", emoji: "🌡️" };
+}
+
+function useShirdiWeather() {
+  const [weather, setWeather] = useState({ temp: null, label: null, emoji: "🌡️", loading: true, error: false });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(
+      "https://api.open-meteo.com/v1/forecast?latitude=19.7827&longitude=74.4856&current=temperature_2m,weathercode,is_day&temperature_unit=celsius&timezone=Asia%2FKolkata",
+      { signal: controller.signal }
+    )
+      .then((r) => r.json())
+      .then((data) => {
+        const c = data.current;
+        const { label, emoji } = parseWeather(c.weathercode, c.is_day);
+        setWeather({
+          temp: Math.round(c.temperature_2m),
+          label,
+          emoji,
+          loading: false,
+          error: false,
+        });
+      })
+      .catch((e) => {
+        if (e.name !== "AbortError")
+          setWeather({ temp: null, label: null, emoji: "🌡️", loading: false, error: true });
+      });
+    return () => controller.abort();
+  }, []);
+
+  return weather;
+}
+
+/* ════════════════════════════════
    VENUE + MAP
 ════════════════════════════════ */
 export function Venue() {
   const [ref, vis] = useReveal();
+  const weather = useShirdiWeather();
+
+  // Build the weather display string
+  const weatherVal = weather.loading
+    ? "Fetching…"
+    : weather.error
+    ? "Unavailable"
+    : `${weather.temp}°C · ${weather.label}`;
+
+  const weatherEmoji = weather.loading ? "⏳" : weather.emoji;
+
   return (
     <section ref={ref} id="venue" className="py-16 sm:py-24 px-4"
       style={{ background: "linear-gradient(180deg, var(--ivory), rgba(200,150,60,0.05), var(--ivory))" }}>
@@ -202,15 +273,33 @@ export function Venue() {
           {/* Info grid */}
           <div className="grid grid-cols-2 gap-3">
             {[
-              { icon:"📞", label:"Contact",  val:"+91 96997 09201" },
-              { icon:"📅", label:"Dates",    val:"9–10 May 2026"   },
-              { icon:"🌡️", label:"Weather",  val:"~38°C · Sunny"   },
-              { icon:"🕌", label:"Nearby",   val:"Sai Baba Shirdi"  },
+              { icon: "📞",        label: "Contact", val: "+91 95793 45348"  },
+              { icon: "📅",        label: "Dates",   val: "9–10 May 2026"    },
+              { icon: weatherEmoji,label: "Shirdi Now", val: weatherVal,
+                highlight: !weather.loading && !weather.error },
+              { icon: "🕌",        label: "Nearby",  val: "Sai Baba Shirdi"  },
             ].map((ic) => (
-              <div key={ic.label} className="venue-ic p-3 text-center">
+              <div
+                key={ic.label}
+                className="venue-ic p-3 text-center"
+                style={ic.highlight ? {
+                  background: "linear-gradient(135deg, rgba(200,150,60,0.12), rgba(232,150,30,0.08))",
+                  border: "1px solid rgba(200,150,60,0.35)",
+                } : {}}
+              >
                 <span className="block text-2xl mb-1">{ic.icon}</span>
-                <p className="text-xs uppercase tracking-wider" style={{ fontFamily: "'Cinzel', serif", color: "var(--text-muted)", letterSpacing: "0.18em" }}>{ic.label}</p>
-                <p className="mt-0.5 text-sm" style={{ fontFamily: "'Playfair Display', serif", color: "var(--text-dark)" }}>{ic.val}</p>
+                <p className="text-xs uppercase tracking-wider"
+                  style={{ fontFamily: "'Cinzel', serif", color: "var(--text-muted)", letterSpacing: "0.18em" }}>
+                  {ic.label}
+                </p>
+                <p className="mt-0.5 text-sm"
+                  style={{
+                    fontFamily: "'Playfair Display', serif",
+                    color: ic.highlight ? "var(--gold-dark)" : "var(--text-dark)",
+                    fontWeight: ic.highlight ? 500 : 400,
+                  }}>
+                  {ic.val}
+                </p>
               </div>
             ))}
           </div>
