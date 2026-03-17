@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import Monogram from "./av_monogram.png";
 
 const links = [
   { label: "Events",   href: "#events"    },
@@ -35,7 +36,7 @@ export default function Navbar() {
           className="flex items-center gap-2 font-cinzel text-base tracking-widest text-yellow-800 focus:outline-none"
           style={{ fontFamily: "'Cinzel', serif" }}
         >
-          <span className="text-xl">🦚</span>
+          <img src={Monogram} width="38px" />
           <span>V &amp; A</span>
         </button>
 
