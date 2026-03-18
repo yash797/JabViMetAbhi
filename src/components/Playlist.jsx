@@ -34,12 +34,13 @@ async function searchTracks(q) {
     return [];
   }
 }
-
+const UPSTASH_URL_LOAD="https://included-shad-76730.upstash.io"
+const UPSTASH_TOKEN_LOAD="gQAAAAAAASu6AAIncDE3NzNjMjRmYmViNjQ0NGE5YjkwN2Q2NzExYzg4YWViY3AxNzY3MzA"
 /* ── Load playlist DIRECTLY from Upstash (CORS supported for reads) ── */
 async function loadSharedPlaylist() {
   try {
-    const res  = await fetch(`${UPSTASH_URL}/get/${PLAYLIST_KEY}`, {
-      headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
+    const res  = await fetch(`${UPSTASH_URL_LOAD}/get/${PLAYLIST_KEY}`, {
+      headers: { Authorization: `Bearer ${UPSTASH_TOKEN_LOAD}` },
     });
     const data = await res.json();
     if (!data.result) return [];
