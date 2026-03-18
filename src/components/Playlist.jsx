@@ -10,58 +10,45 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
    5. Duplicate detection with toast error
    ══════════════════════════════════════════════════════════════ */
 
-// ── Upstash Redis ─────────────────────────────────────────────
-const UPSTASH_URL   = process.env.REACT_APP_UPSTASH_REDIS_REST_URL;
-const UPSTASH_TOKEN = process.env.REACT_APP_UPSTASH_REDIS_REST_TOKEN;
-const PLAYLIST_KEY  = "va_wedding_songs";
-
 // ── Local queue storage key ───────────────────────────────────
 const LOCAL_KEY = "va_local_queue";
+const API       = "/api/spotify";
 
-/* ── Upstash REST ── */
-async function redisGet(key) {
-  try {
-    const res  = await fetch(`${UPSTASH_URL}/get/${key}`, {
-      headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
-    });
-    const data = await res.json();
-    return data.result ? JSON.parse(data.result) : [];
-  } catch { return []; }
-}
-
-async function redisSet(key, value) {
-  try {
-    await fetch(`${UPSTASH_URL}/set/${key}`, {
-      method:  "POST",
-      headers: {
-        Authorization:  `Bearer ${UPSTASH_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(JSON.stringify(value)),
-    });
-    return true;
-  } catch { return false; }
-}
-
-/* ── Deezer search via corsproxy.io ── */
+/* ── Search via Vercel function ── */
 async function searchTracks(q) {
   if (!q.trim()) return [];
   try {
-    const target = `https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=6`;
-    const res    = await fetch(`https://corsproxy.io/?${encodeURIComponent(target)}`);
-    const data   = await res.json();
-    return (data.data || []).map(t => ({
-      id:          String(t.id),
-      name:        t.title,
-      artist:      t.artist?.name || "",
-      album:       t.album?.title || "",
-      image:       t.album?.cover_medium || "",
-      duration_ms: (t.duration || 0) * 1000,
-      url:         t.link || "#",
-    }));
+    const res  = await fetch(`${API}?q=${encodeURIComponent(q)}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return Array.isArray(data) ? data : [];
   } catch (e) {
     console.error("[Search] error:", e.message);
     return [];
+  }
+}
+
+/* ── Load shared playlist from Redis via Vercel function ── */
+async function loadSharedPlaylist() {
+  try {
+    const res  = await fetch(`${API}?action=playlist`);
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch { return []; }
+}
+
+/* ── Submit queue to Redis via Vercel function ── */
+async function submitQueue(songs) {
+  try {
+    const res  = await fetch(`${API}?action=submit`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ songs }),
+    });
+    const data = await res.json();
+    return data;
+  } catch (e) {
+    return { error: e.message };
   }
 }
 
@@ -361,7 +348,7 @@ export default function Playlist() {
     setQueue(prev => prev.filter(s => s.id !== id));
   };
 
-  /* submit queue to Upstash Redis */
+  /* submit queue to Redis via Vercel function */
   const submitPlaylist = async () => {
     if (queue.length === 0) {
       showToast("Add at least one song first!", "error");
@@ -369,48 +356,36 @@ export default function Playlist() {
     }
     setSubmitting(true);
 
-    // load existing shared list
-    const existing = await redisGet(PLAYLIST_KEY);
-    const existingIds = new Set((existing || []).map(s => s.id));
-
     const guestName = name.trim() || "A Guest";
     const timestamp = new Date().toLocaleDateString("en-IN", { day:"numeric", month:"short" });
+    const tagged    = queue.map(s => ({ ...s, by: guestName, at: timestamp }));
 
-    // merge — skip duplicates, tag with guest name
-    const toAdd = queue
-      .filter(s => !existingIds.has(s.id))
-      .map(s => ({ ...s, by: guestName, at: timestamp }));
-
-    const duplicates = queue.filter(s => existingIds.has(s.id));
-
-    const updated = [...(existing || []), ...toAdd];
-    const ok = await redisSet(PLAYLIST_KEY, updated);
-
+    const result = await submitQueue(tagged);
     setSubmitting(false);
 
-    if (ok) {
+    if (result.error) {
+      showToast("Something went wrong. Please try again.", "error");
+    } else {
       setSubmitted(true);
       setQueue([]);
       localStorage.removeItem(LOCAL_KEY);
-      if (duplicates.length > 0) {
+      if (result.duplicates > 0) {
         showToast(
-          `${toAdd.length} song${toAdd.length !== 1 ? "s" : ""} added! (${duplicates.length} already in playlist)`,
+          `${result.added} song${result.added !== 1 ? "s" : ""} added! (${result.duplicates} already in playlist)`,
           "success"
         );
       } else {
-        showToast(`${toAdd.length} song${toAdd.length !== 1 ? "s" : ""} added to the wedding playlist! 🎉`);
+        showToast(`${result.added} song${result.added !== 1 ? "s" : ""} added to the wedding playlist! 🎉`);
       }
-    } else {
-      showToast("Something went wrong. Please try again.", "error");
     }
   };
 
-  /* load shared list from Redis */
+  /* load shared list from Redis via Vercel function */
   const loadSharedList = async () => {
     setShowShared(true);
     setLoadingShared(true);
-    const songs = await redisGet(PLAYLIST_KEY);
-    setSharedSongs(Array.isArray(songs) ? songs : []);
+    const songs = await loadSharedPlaylist();
+    setSharedSongs(songs);
     setLoadingShared(false);
   };
 
