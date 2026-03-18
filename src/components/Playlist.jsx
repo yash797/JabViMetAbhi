@@ -1,12 +1,20 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 
 /* iTunes search + Upstash Redis shared playlist */
+
+// Use absolute URL to bypass CRA's client-side routing
+const API = typeof window !== "undefined"
+  ? `${window.location.origin}/api/spotify`
+  : "/api/spotify";
+
 async function searchTracks(q) {
   if (!q.trim()) return [];
   try {
-    const res  = await fetch(`/api/spotify?q=${encodeURIComponent(q)}`);
-    const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+    const res  = await fetch(`${API}?q=${encodeURIComponent(q)}`);
+    const text = await res.text();
+    if (text.trim().startsWith("<")) throw new Error("API route not found — check Vercel deployment");
+    const data = JSON.parse(text);
+    if (data.error) throw new Error(data.error);
     return Array.isArray(data) ? data : [];
   } catch (e) {
     console.error("[Search] error:", e.message);
@@ -16,28 +24,34 @@ async function searchTracks(q) {
 
 async function loadPlaylist() {
   try {
-    const res  = await fetch("/api/spotify?action=playlist");
-    const data = await res.json();
+    const res  = await fetch(`${API}?action=playlist`);
+    const text = await res.text();
+    if (text.trim().startsWith("<")) return [];
+    const data = JSON.parse(text);
     return Array.isArray(data) ? data : [];
   } catch { return []; }
 }
 
 async function addToPlaylist(song) {
   try {
-    const res  = await fetch("/api/spotify?action=add", {
+    const res  = await fetch(`${API}?action=add`, {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
       body:    JSON.stringify(song),
     });
-    const data = await res.json();
+    const text = await res.text();
+    if (text.trim().startsWith("<")) return null;
+    const data = JSON.parse(text);
     return Array.isArray(data) ? data : null;
   } catch { return null; }
 }
 
 async function removeFromPlaylist(id) {
   try {
-    const res  = await fetch(`/api/spotify?action=remove&id=${id}`, { method: "DELETE" });
-    const data = await res.json();
+    const res  = await fetch(`${API}?action=remove&id=${id}`, { method: "DELETE" });
+    const text = await res.text();
+    if (text.trim().startsWith("<")) return null;
+    const data = JSON.parse(text);
     return Array.isArray(data) ? data : null;
   } catch { return null; }
 }

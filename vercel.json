@@ -1,8 +1,3 @@
 {
-  "version": 2,
-  "rewrites": [
-    { "source": "/api/spotify", "destination": "/api/spotify" },
-    { "source": "/api/spotify/:path*", "destination": "/api/spotify" },
-    { "source": "/(.*)", "destination": "/index.html" }
-  ]
+  "framework": "create-react-app"
 }
