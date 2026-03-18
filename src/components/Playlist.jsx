@@ -1,15 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 
-/* ══════════════════════════════════════════════════════════════
-   PLAYLIST — Spotify via Vercel serverless proxy
-   Calls /api/spotify which runs server-side on Vercel
-   Credentials stored in Vercel env vars — never in browser
-   ══════════════════════════════════════════════════════════════ */
-
 const STORAGE_KEY = "va_wedding_playlist_v4";
 const PROXY = "/api/spotify";
 
-/* ── Get token via Vercel proxy ── */
+/* Get token via Vercel proxy */
 async function getToken() {
   try {
     const cached = sessionStorage.getItem("sp_tok_v2");
@@ -29,12 +23,17 @@ async function getToken() {
   }
 }
 
-/* ── Search via Vercel proxy ── */
+/* Search via Vercel proxy - token sent in POST body to avoid URL length issues */
 async function searchSpotify(q, token) {
   if (!q.trim() || !token) return [];
   try {
-    const res  = await fetch(
-      `${PROXY}?action=search&q=${encodeURIComponent(q)}&token=${token}`
+    const res = await fetch(
+      `${PROXY}?action=search&q=${encodeURIComponent(q)}`,
+      {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ token }),
+      }
     );
     const data = await res.json();
     if (res.status === 401) {
@@ -49,6 +48,7 @@ async function searchSpotify(q, token) {
     return [];
   }
 }
+
 
 /* ── helpers ── */
 function fmt(ms) {
