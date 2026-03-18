@@ -32,21 +32,25 @@ async function redisSet(key, value) {
   } catch { /**/ }
 }
 
-/* ── iTunes Search — CORS open, works from browser ── */
+/* ── Music Search via proxy (local) or direct (production) ── */
 async function searchTracks(q) {
   if (!q.trim()) return [];
   try {
-    const res  = await fetch(
-      `https://itunes.apple.com/search?term=${encodeURIComponent(q)}&media=music&limit=6&country=IN`
-    );
+    // Use CORS proxy for local dev, direct for production
+    const isLocal = window.location.hostname === "localhost";
+    const url = isLocal
+      ? `https://corsproxy.io/?${encodeURIComponent(`https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=6`)}`
+      : `https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=6`;
+
+    const res  = await fetch(url);
     const data = await res.json();
-    return (data.results || []).map(t => ({
-      id:            String(t.trackId),
-      name:          t.trackName,
-      artists:       [{ name: t.artistName }],
-      album:         { name: t.collectionName, images: [{ url: t.artworkUrl100 }] },
-      duration_ms:   t.trackTimeMillis,
-      external_urls: { spotify: t.trackViewUrl },
+    return (data.data || []).map(t => ({
+      id:            String(t.id),
+      name:          t.title,
+      artists:       [{ name: t.artist?.name || "" }],
+      album:         { name: t.album?.title || "", images: [{ url: t.album?.cover_medium || "" }] },
+      duration_ms:   (t.duration || 0) * 1000,
+      external_urls: { spotify: t.link || "#" },
     }));
   } catch (e) {
     console.error("[Search] error:", e.message);
@@ -436,8 +440,8 @@ export default function Playlist() {
                     borderBottom: ri < results.length - 1
                       ? "1px solid rgba(200,150,60,0.1)" : "none" }}>
 
-                  {t.album.images?.[2]?.url
-                    ? <img src={t.album.images[2].url} alt=""
+                  {t.album.images?.[0]?.url
+                    ? <img src={t.album.images[0].url} alt=""
                         style={{ width:"44px", height:"44px", borderRadius:"8px",
                           objectFit:"cover", flexShrink:0,
                           boxShadow:"0 2px 10px rgba(26,107,107,0.18)" }} />
