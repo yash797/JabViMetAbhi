@@ -1,59 +1,78 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 
-/* iTunes search + Upstash Redis shared playlist */
+// ── Upstash Redis credentials loaded from .env ─────────────────
+// Add these to your .env file (and Vercel env vars):
+//   REACT_APP_UPSTASH_REDIS_REST_URL=https://xxxx.upstash.io
+//   REACT_APP_UPSTASH_REDIS_REST_TOKEN=AXxxxx...
+const UPSTASH_URL   = process.env.REACT_APP_UPSTASH_REDIS_REST_URL;
+const UPSTASH_TOKEN = process.env.REACT_APP_UPSTASH_REDIS_REST_TOKEN;
+const PLAYLIST_KEY  = "va_wedding_songs";
 
-// Use absolute URL to bypass CRA's client-side routing
-const API = typeof window !== "undefined"
-  ? `${window.location.origin}/api/spotify`
-  : "/api/spotify";
+/* ── Upstash REST helpers — work directly from browser ── */
+async function redisGet(key) {
+  try {
+    const res  = await fetch(`${UPSTASH_URL}/get/${key}`, {
+      headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
+    });
+    const data = await res.json();
+    return data.result ? JSON.parse(data.result) : null;
+  } catch { return null; }
+}
 
+async function redisSet(key, value) {
+  try {
+    await fetch(`${UPSTASH_URL}/set/${key}`, {
+      method:  "POST",
+      headers: {
+        Authorization:  `Bearer ${UPSTASH_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(JSON.stringify(value)),
+    });
+  } catch { /**/ }
+}
+
+/* ── iTunes Search — CORS open, works from browser ── */
 async function searchTracks(q) {
   if (!q.trim()) return [];
   try {
-    const res  = await fetch(`${API}?q=${encodeURIComponent(q)}`);
-    const text = await res.text();
-    if (text.trim().startsWith("<")) throw new Error("API route not found — check Vercel deployment");
-    const data = JSON.parse(text);
-    if (data.error) throw new Error(data.error);
-    return Array.isArray(data) ? data : [];
+    const res  = await fetch(
+      `https://itunes.apple.com/search?term=${encodeURIComponent(q)}&media=music&limit=6&country=IN`
+    );
+    const data = await res.json();
+    return (data.results || []).map(t => ({
+      id:            String(t.trackId),
+      name:          t.trackName,
+      artists:       [{ name: t.artistName }],
+      album:         { name: t.collectionName, images: [{ url: t.artworkUrl100 }] },
+      duration_ms:   t.trackTimeMillis,
+      external_urls: { spotify: t.trackViewUrl },
+    }));
   } catch (e) {
     console.error("[Search] error:", e.message);
     return [];
   }
 }
 
+/* ── Playlist CRUD via Upstash ── */
 async function loadPlaylist() {
-  try {
-    const res  = await fetch(`${API}?action=playlist`);
-    const text = await res.text();
-    if (text.trim().startsWith("<")) return [];
-    const data = JSON.parse(text);
-    return Array.isArray(data) ? data : [];
-  } catch { return []; }
+  const songs = await redisGet(PLAYLIST_KEY);
+  return Array.isArray(songs) ? songs : [];
 }
 
 async function addToPlaylist(song) {
-  try {
-    const res  = await fetch(`${API}?action=add`, {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify(song),
-    });
-    const text = await res.text();
-    if (text.trim().startsWith("<")) return null;
-    const data = JSON.parse(text);
-    return Array.isArray(data) ? data : null;
-  } catch { return null; }
+  const songs = await loadPlaylist();
+  if (songs.find(s => s.id === song.id)) return songs;
+  const updated = [song, ...songs];
+  await redisSet(PLAYLIST_KEY, updated);
+  return updated;
 }
 
 async function removeFromPlaylist(id) {
-  try {
-    const res  = await fetch(`${API}?action=remove&id=${id}`, { method: "DELETE" });
-    const text = await res.text();
-    if (text.trim().startsWith("<")) return null;
-    const data = JSON.parse(text);
-    return Array.isArray(data) ? data : null;
-  } catch { return null; }
+  const songs  = await loadPlaylist();
+  const updated = songs.filter(s => s.id !== id);
+  await redisSet(PLAYLIST_KEY, updated);
+  return updated;
 }
 
 
@@ -143,10 +162,10 @@ export default function Playlist() {
   const [copied, setCopied]       = useState(false);
   const debRef = useRef(null);
 
-  /* load shared playlist from server */
+  /* load shared playlist from Upstash */
   useEffect(() => {
     setLoadingList(true);
-    loadPlaylist().then((data) => {
+    loadPlaylist().then(data => {
       setSongs(data);
       setLoadingList(false);
     });
@@ -236,19 +255,20 @@ export default function Playlist() {
       by:       name.trim() || "A Guest",
       at:       new Date().toLocaleDateString("en-IN", { day:"numeric", month:"short" }),
     };
+    // optimistic update
+    setSongs(prev => [entry, ...prev.filter(s => s.id !== entry.id)]);
     setSaving(true);
     const updated = await addToPlaylist(entry);
     if (updated) setSongs(updated);
-    else setSongs(prev => [entry, ...prev]); // fallback
     setSaving(false);
     setAdded(t.id); setTimeout(() => setAdded(null), 2000);
     setQuery(""); setResults([]);
   };
 
   const remove = async (id) => {
+    setSongs(prev => prev.filter(s => s.id !== id)); // optimistic
     const updated = await removeFromPlaylist(id);
     if (updated) setSongs(updated);
-    else setSongs(prev => prev.filter(s => s.id !== id)); // fallback
   };
 
   const copyDJ = () => {
