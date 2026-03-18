@@ -1,22 +1,32 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 
-// ── Upstash Redis credentials loaded from .env ─────────────────
-// Add these to your .env file (and Vercel env vars):
-//   REACT_APP_UPSTASH_REDIS_REST_URL=https://xxxx.upstash.io
-//   REACT_APP_UPSTASH_REDIS_REST_TOKEN=AXxxxx...
+/* ══════════════════════════════════════════════════════════════
+   PLAYLIST
+   Flow:
+   1. Search songs via Deezer (CORS proxy)
+   2. Add to LOCAL queue instantly
+   3. "Submit to Playlist" → saves queue to Upstash Redis
+   4. "View Added Songs" → loads shared list from Redis
+   5. Duplicate detection with toast error
+   ══════════════════════════════════════════════════════════════ */
+
+// ── Upstash Redis ─────────────────────────────────────────────
 const UPSTASH_URL   = process.env.REACT_APP_UPSTASH_REDIS_REST_URL;
 const UPSTASH_TOKEN = process.env.REACT_APP_UPSTASH_REDIS_REST_TOKEN;
 const PLAYLIST_KEY  = "va_wedding_songs";
 
-/* ── Upstash REST helpers — work directly from browser ── */
+// ── Local queue storage key ───────────────────────────────────
+const LOCAL_KEY = "va_local_queue";
+
+/* ── Upstash REST ── */
 async function redisGet(key) {
   try {
     const res  = await fetch(`${UPSTASH_URL}/get/${key}`, {
       headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
     });
     const data = await res.json();
-    return data.result ? JSON.parse(data.result) : null;
-  } catch { return null; }
+    return data.result ? JSON.parse(data.result) : [];
+  } catch { return []; }
 }
 
 async function redisSet(key, value) {
@@ -29,62 +39,31 @@ async function redisSet(key, value) {
       },
       body: JSON.stringify(JSON.stringify(value)),
     });
-  } catch { /**/ }
+    return true;
+  } catch { return false; }
 }
 
-/* ── Music Search via MusicBrainz — no CORS issues, no key needed ── */
+/* ── Deezer search via corsproxy.io ── */
 async function searchTracks(q) {
   if (!q.trim()) return [];
   try {
-    const res = await fetch(
-      `https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(q)}&limit=6&fmt=json`,
-      { headers: { "User-Agent": "VAWeddingApp/1.0 (wedding@example.com)" } }
-    );
-    const data = await res.json();
-    return (data.recordings || []).map((r, i) => {
-      const artist = r["artist-credit"]?.[0]?.artist?.name || "";
-      const release = r.releases?.[0];
-      const albumName = release?.title || "";
-      const mbid = release?.id || "";
-      return {
-        id:            r.id || String(i),
-        name:          r.title,
-        artists:       [{ name: artist }],
-        album:         {
-          name: albumName,
-          images: [{ url: mbid ? `https://coverartarchive.org/release/${mbid}/front-250` : "" }],
-        },
-        duration_ms:   r.length || 0,
-        external_urls: { spotify: `https://musicbrainz.org/recording/${r.id}` },
-      };
-    });
+    const target = `https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=6`;
+    const res    = await fetch(`https://corsproxy.io/?${encodeURIComponent(target)}`);
+    const data   = await res.json();
+    return (data.data || []).map(t => ({
+      id:          String(t.id),
+      name:        t.title,
+      artist:      t.artist?.name || "",
+      album:       t.album?.title || "",
+      image:       t.album?.cover_medium || "",
+      duration_ms: (t.duration || 0) * 1000,
+      url:         t.link || "#",
+    }));
   } catch (e) {
     console.error("[Search] error:", e.message);
     return [];
   }
 }
-
-/* ── Playlist CRUD via Upstash ── */
-async function loadPlaylist() {
-  const songs = await redisGet(PLAYLIST_KEY);
-  return Array.isArray(songs) ? songs : [];
-}
-
-async function addToPlaylist(song) {
-  const songs = await loadPlaylist();
-  if (songs.find(s => s.id === song.id)) return songs;
-  const updated = [song, ...songs];
-  await redisSet(PLAYLIST_KEY, updated);
-  return updated;
-}
-
-async function removeFromPlaylist(id) {
-  const songs  = await loadPlaylist();
-  const updated = songs.filter(s => s.id !== id);
-  await redisSet(PLAYLIST_KEY, updated);
-  return updated;
-}
-
 
 /* ── helpers ── */
 function fmt(ms) {
@@ -92,32 +71,21 @@ function fmt(ms) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-function useReveal(threshold = 0.08) {
+function useReveal(t = 0.08) {
   const ref = useRef(null);
   const [vis, setVis] = useState(false);
   useEffect(() => {
-    const obs = new IntersectionObserver(
+    const o = new IntersectionObserver(
       ([e]) => { if (e.isIntersecting) setVis(true); },
-      { threshold }
+      { threshold: t }
     );
-    if (ref.current) obs.observe(ref.current);
-    return () => obs.disconnect();
-  }, [threshold]);
+    if (ref.current) o.observe(ref.current);
+    return () => o.disconnect();
+  }, [t]);
   return [ref, vis];
 }
 
-/* ── sub-components ── */
-function MusicIcon({ size = 18, color = "var(--teal)" }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
-      stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9 18V5l12-2v13"/>
-      <circle cx="6" cy="18" r="3"/>
-      <circle cx="18" cy="16" r="3"/>
-    </svg>
-  );
-}
-
+/* ── EQ Bars ── */
 function EqBars({ n = 5, h = 24, active = true, color = "var(--teal)" }) {
   return (
     <span style={{ display:"inline-flex", alignItems:"flex-end", gap:"2.5px", height:`${h}px` }}>
@@ -134,6 +102,19 @@ function EqBars({ n = 5, h = 24, active = true, color = "var(--teal)" }) {
   );
 }
 
+/* ── Music Icon ── */
+function MusicIcon({ size = 18, color = "var(--teal)" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 18V5l12-2v13"/>
+      <circle cx="6" cy="18" r="3"/>
+      <circle cx="18" cy="16" r="3"/>
+    </svg>
+  );
+}
+
+/* ── Floating Notes ── */
 function FloatingNotes() {
   const notes  = ["♪","♫","♬","♩"];
   const colors = ["var(--gold)","var(--teal)","#E8961E","#C8963C"];
@@ -156,34 +137,139 @@ function FloatingNotes() {
   );
 }
 
+/* ── Toast ── */
+function Toast({ message, type, onClose }) {
+  useEffect(() => {
+    const t = setTimeout(onClose, 3000);
+    return () => clearTimeout(t);
+  }, [onClose]);
+
+  const bg = type === "error"
+    ? "linear-gradient(135deg, #FFF0EE, #FDDDD8)"
+    : "linear-gradient(135deg, #EDF7E3, #C8E6B8)";
+  const border = type === "error"
+    ? "1px solid rgba(196,96,122,0.35)"
+    : "1px solid rgba(58,122,58,0.3)";
+  const color = type === "error" ? "#9B2040" : "#3A6020";
+  const icon  = type === "error" ? "⚠️" : "✓";
+
+  return (
+    <div style={{
+      position:"fixed", bottom:"2rem", left:"50%", transform:"translateX(-50%)",
+      zIndex:999, background:bg, border, borderRadius:"14px",
+      padding:"0.85rem 1.5rem", display:"flex", alignItems:"center", gap:"0.6rem",
+      boxShadow:"0 8px 30px rgba(0,0,0,0.12)",
+      animation:"toastIn .3s ease",
+      fontFamily:"'Lato',sans-serif", fontSize:"0.88rem", color,
+      maxWidth:"90vw", whiteSpace:"nowrap",
+    }}>
+      <span>{icon}</span>
+      <span>{message}</span>
+    </div>
+  );
+}
+
 /* ══════════════════════════════════════════════════════════════
-   MAIN
+   TRACK ROW — reused in both queue and shared list
+   ══════════════════════════════════════════════════════════════ */
+function TrackRow({ track, index, rightSlot }) {
+  return (
+    <div style={{
+      display:"flex", alignItems:"center", gap:"0.75rem",
+      padding:"0.7rem 0.9rem", borderRadius:"14px",
+      background:"rgba(255,255,255,0.75)", backdropFilter:"blur(8px)",
+      border:"1px solid rgba(200,150,60,0.15)",
+      transition:"background .2s, transform .2s",
+    }}
+    onMouseEnter={e => { e.currentTarget.style.background="rgba(255,255,255,0.95)"; e.currentTarget.style.transform="translateX(3px)"; }}
+    onMouseLeave={e => { e.currentTarget.style.background="rgba(255,255,255,0.75)"; e.currentTarget.style.transform="translateX(0)"; }}
+    >
+      {/* number */}
+      <span style={{ fontSize:"0.65rem", color:"var(--text-muted)", flexShrink:0,
+        width:"18px", textAlign:"right", fontFamily:"'Cinzel',serif" }}>
+        {index + 1}
+      </span>
+
+      {/* album art */}
+      {track.image
+        ? <img src={track.image} alt="" style={{ width:"40px", height:"40px",
+            borderRadius:"7px", objectFit:"cover", flexShrink:0,
+            boxShadow:"0 2px 8px rgba(26,107,107,0.15)" }} />
+        : <div style={{ width:"40px", height:"40px", borderRadius:"7px", flexShrink:0,
+            background:"rgba(26,107,107,0.07)", display:"flex",
+            alignItems:"center", justifyContent:"center", fontSize:"0.9rem" }}>🎵</div>
+      }
+
+      {/* info */}
+      <div style={{ flex:1, minWidth:0 }}>
+        <p style={{ fontFamily:"'Playfair Display',serif", fontSize:"0.86rem",
+          color:"var(--text-dark)", overflow:"hidden",
+          textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+          {track.name}
+        </p>
+        <p style={{ fontSize:"0.69rem", color:"var(--text-soft)", marginTop:"1px",
+          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+          {track.artist}
+          {track.duration_ms ? ` · ${fmt(track.duration_ms)}` : ""}
+        </p>
+      </div>
+
+      {/* by (shared list only) */}
+      {track.by && (
+        <span style={{ fontSize:"0.65rem", color:"var(--teal)", flexShrink:0,
+          display:"none" }} className="plSmShow">
+          {track.by}
+        </span>
+      )}
+
+      {/* right slot — remove btn or nothing */}
+      {rightSlot}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   MAIN COMPONENT
    ══════════════════════════════════════════════════════════════ */
 export default function Playlist() {
-  const [ref, vis]                = useReveal();
+  const [ref, vis]    = useReveal();
+
+  // search
   const [query, setQuery]         = useState("");
   const [results, setResults]     = useState([]);
   const [searching, setSearching] = useState(false);
-  const [songs, setSongs]         = useState([]);
-  const [loadingList, setLoadingList] = useState(true);
+
+  // local queue (this guest's picks before submitting)
+  const [queue, setQueue]         = useState(() => {
+    try { return JSON.parse(localStorage.getItem(LOCAL_KEY) || "[]"); } catch { return []; }
+  });
+
+  // guest name
   const [name, setName]           = useState("");
-  const [added, setAdded]         = useState(null);
-  const [saving, setSaving]       = useState(false);
-  const [copied, setCopied]       = useState(false);
+
+  // submission
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted]   = useState(false);
+
+  // shared list view
+  const [showShared, setShowShared]     = useState(false);
+  const [sharedSongs, setSharedSongs]   = useState([]);
+  const [loadingShared, setLoadingShared] = useState(false);
+  const [copied, setCopied]             = useState(false);
+
+  // toast
+  const [toast, setToast] = useState(null); // { message, type }
+
   const debRef = useRef(null);
 
-  /* load shared playlist from Upstash */
+  /* persist queue to localStorage */
   useEffect(() => {
-    setLoadingList(true);
-    loadPlaylist().then(data => {
-      setSongs(data);
-      setLoadingList(false);
-    });
-  }, []);
+    try { localStorage.setItem(LOCAL_KEY, JSON.stringify(queue)); } catch { /**/ }
+  }, [queue]);
 
   /* inject keyframes once */
   useEffect(() => {
-    const id = "pl-kf4";
+    const id = "pl-kf5";
     if (document.getElementById(id)) return;
     const s = document.createElement("style");
     s.id = id;
@@ -199,36 +285,30 @@ export default function Playlist() {
         to   { transform:scaleY(1); }
       }
       @keyframes plSpin  { to { transform:rotate(360deg); } }
-      @keyframes plSlide {
-        from { opacity:0; transform:translateX(-12px); }
-        to   { opacity:1; transform:translateX(0); }
+      @keyframes toastIn {
+        from { opacity:0; transform:translateX(-50%) translateY(16px); }
+        to   { opacity:1; transform:translateX(-50%) translateY(0); }
       }
       .plR { opacity:0; transform:translateY(24px);
              transition:opacity .72s ease, transform .72s ease; }
       .plV { opacity:1 !important; transform:translateY(0) !important; }
       .d1{transition-delay:.07s} .d2{transition-delay:.16s}
       .d3{transition-delay:.25s} .d4{transition-delay:.34s}
-      .plSlide { animation:plSlide .32s ease forwards; }
       .plSpin  { animation:plSpin 10s linear infinite; }
-      .plSearchInp::placeholder { color:var(--text-muted); }
-      .plSearchInp:focus {
+      .plSrch::placeholder  { color:var(--text-muted); }
+      .plSrch:focus  {
         outline:none;
         border-color:var(--teal) !important;
         box-shadow:0 0 0 3px rgba(26,107,107,0.12) !important;
       }
-      .plNameInp::placeholder { color:var(--text-muted); }
-      .plNameInp:focus {
+      .plName::placeholder { color:var(--text-muted); }
+      .plName:focus {
         outline:none;
         border-color:var(--gold) !important;
         box-shadow:0 0 0 3px rgba(200,150,60,0.1) !important;
       }
-      .plResultRow { transition:background .18s; cursor:default; }
-      .plResultRow:hover { background:rgba(26,107,107,0.06) !important; }
-      .plSongRow { transition:background .2s, transform .2s; }
-      .plSongRow:hover {
-        background:rgba(255,255,255,0.95) !important;
-        transform:translateX(3px);
-      }
+      .plResRow { transition:background .18s; }
+      .plResRow:hover { background:rgba(26,107,107,0.06) !important; }
       @media(min-width:500px){ .plSmShow{ display:block !important; } }
     `;
     document.head.appendChild(s);
@@ -239,7 +319,7 @@ export default function Playlist() {
     if (!q.trim()) { setResults([]); return; }
     setSearching(true);
     const res = await searchTracks(q);
-    setResults(Array.isArray(res) ? res : []);
+    setResults(res);
     setSearching(false);
   }, []);
 
@@ -250,42 +330,96 @@ export default function Playlist() {
     debRef.current = setTimeout(() => doSearch(val), 400);
   };
 
-  const addTrack = async (t) => {
-    if (songs.find((s) => s.id === t.id)) {
-      setAdded(t.id); setTimeout(() => setAdded(null), 1800); return;
-    }
-    const entry = {
-      id:       t.id,
-      name:     t.name,
-      artist:   t.artists.map((a) => a.name).join(", "),
-      album:    t.album.name,
-      image:    t.album.images?.[1]?.url || t.album.images?.[0]?.url || "",
-      duration: fmt(t.duration_ms),
-      url:      t.external_urls.spotify || "#",
-      by:       name.trim() || "A Guest",
-      at:       new Date().toLocaleDateString("en-IN", { day:"numeric", month:"short" }),
-    };
-    // optimistic update
-    setSongs(prev => [entry, ...prev.filter(s => s.id !== entry.id)]);
-    setSaving(true);
-    const updated = await addToPlaylist(entry);
-    if (updated) setSongs(updated);
-    setSaving(false);
-    setAdded(t.id); setTimeout(() => setAdded(null), 2000);
-    setQuery(""); setResults([]);
+  /* show toast */
+  const showToast = (message, type = "success") => {
+    setToast({ message, type });
   };
 
-  const remove = async (id) => {
-    setSongs(prev => prev.filter(s => s.id !== id)); // optimistic
-    const updated = await removeFromPlaylist(id);
-    if (updated) setSongs(updated);
+  /* add to LOCAL queue */
+  const addToQueue = (t) => {
+    // check local queue
+    if (queue.find(s => s.id === t.id)) {
+      showToast("This song is already in your queue!", "error");
+      return;
+    }
+    setQueue(prev => [...prev, {
+      id:          t.id,
+      name:        t.name,
+      artist:      t.artist,
+      album:       t.album,
+      image:       t.image,
+      duration_ms: t.duration_ms,
+      url:         t.url,
+    }]);
+    setQuery("");
+    setResults([]);
+    showToast(`"${t.name}" added to your queue ✓`);
+  };
+
+  /* remove from local queue */
+  const removeFromQueue = (id) => {
+    setQueue(prev => prev.filter(s => s.id !== id));
+  };
+
+  /* submit queue to Upstash Redis */
+  const submitPlaylist = async () => {
+    if (queue.length === 0) {
+      showToast("Add at least one song first!", "error");
+      return;
+    }
+    setSubmitting(true);
+
+    // load existing shared list
+    const existing = await redisGet(PLAYLIST_KEY);
+    const existingIds = new Set((existing || []).map(s => s.id));
+
+    const guestName = name.trim() || "A Guest";
+    const timestamp = new Date().toLocaleDateString("en-IN", { day:"numeric", month:"short" });
+
+    // merge — skip duplicates, tag with guest name
+    const toAdd = queue
+      .filter(s => !existingIds.has(s.id))
+      .map(s => ({ ...s, by: guestName, at: timestamp }));
+
+    const duplicates = queue.filter(s => existingIds.has(s.id));
+
+    const updated = [...(existing || []), ...toAdd];
+    const ok = await redisSet(PLAYLIST_KEY, updated);
+
+    setSubmitting(false);
+
+    if (ok) {
+      setSubmitted(true);
+      setQueue([]);
+      localStorage.removeItem(LOCAL_KEY);
+      if (duplicates.length > 0) {
+        showToast(
+          `${toAdd.length} song${toAdd.length !== 1 ? "s" : ""} added! (${duplicates.length} already in playlist)`,
+          "success"
+        );
+      } else {
+        showToast(`${toAdd.length} song${toAdd.length !== 1 ? "s" : ""} added to the wedding playlist! 🎉`);
+      }
+    } else {
+      showToast("Something went wrong. Please try again.", "error");
+    }
+  };
+
+  /* load shared list from Redis */
+  const loadSharedList = async () => {
+    setShowShared(true);
+    setLoadingShared(true);
+    const songs = await redisGet(PLAYLIST_KEY);
+    setSharedSongs(Array.isArray(songs) ? songs : []);
+    setLoadingShared(false);
   };
 
   const copyDJ = () => {
     navigator.clipboard.writeText(
-      songs.map((s, i) => `${i + 1}. ${s.name} — ${s.artist}  (by ${s.by})`).join("\n")
+      sharedSongs.map((s, i) => `${i + 1}. ${s.name} — ${s.artist}  (by ${s.by || "Guest"})`).join("\n")
     ).catch(() => {});
-    setCopied(true); setTimeout(() => setCopied(false), 2200);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2200);
   };
 
   const inputStyle = (extra = {}) => ({
@@ -296,7 +430,6 @@ export default function Playlist() {
     color:"var(--text-dark)", transition:"border-color .3s, box-shadow .3s",
     ...extra,
   });
-
 
   return (
     <section ref={ref} id="playlist" style={{
@@ -310,8 +443,17 @@ export default function Playlist() {
     }}>
       <FloatingNotes />
 
-      {/* gold rules */}
-      {["top","bottom"].map((p) => (
+      {/* toast */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
+
+      {/* top/bottom gold rules */}
+      {["top","bottom"].map(p => (
         <div key={p} style={{ position:"absolute", [p]:0, left:0, right:0, height:"1px",
           background:"linear-gradient(90deg,transparent,var(--gold-light),var(--gold),var(--gold-light),transparent)" }} />
       ))}
@@ -350,8 +492,8 @@ export default function Playlist() {
           </h2>
           <p style={{ fontFamily:"'EB Garamond',Georgia,serif", fontStyle:"italic",
             fontSize:"1.05rem", color:"var(--text-muted)", marginTop:"0.6rem", lineHeight:1.7 }}>
-            Drop your favourite party song &amp; help us build the perfect
-            wedding night soundtrack — from Bollywood to bangers!
+            Search your favourite songs, build your queue, then submit — help us
+            create the perfect wedding night soundtrack!
           </p>
           <div style={{ display:"flex", alignItems:"center", justifyContent:"center",
             gap:"0.9rem", marginTop:"1rem" }}>
@@ -361,296 +503,372 @@ export default function Playlist() {
             <div style={{ flex:1, maxWidth:"80px", height:"1px",
               background:"linear-gradient(90deg,var(--gold-light),transparent)" }} />
           </div>
+
+          {/* View Added Songs button */}
+          <button
+            onClick={loadSharedList}
+            style={{
+              marginTop:"1.2rem",
+              background:"transparent",
+              border:"1px solid rgba(26,107,107,0.35)",
+              borderRadius:"30px",
+              padding:"0.5rem 1.4rem",
+              fontFamily:"'Cinzel',serif",
+              fontSize:"0.65rem",
+              letterSpacing:"0.2em",
+              textTransform:"uppercase",
+              color:"var(--teal)",
+              cursor:"pointer",
+              transition:"all .25s",
+            }}
+            onMouseEnter={e => { e.target.style.background="rgba(26,107,107,0.08)"; }}
+            onMouseLeave={e => { e.target.style.background="transparent"; }}
+          >
+            🎵 View Added Songs ({sharedSongs.length > 0 ? sharedSongs.length : "?"})
+          </button>
         </div>
 
-        {/* ── TOKEN ERROR BANNER ── */}
-
-
-        {/* ── NAME INPUT ── */}
-        <div className={`plR d2 ${vis ? "plV" : ""}`} style={{ marginBottom:"0.9rem" }}>
-          <label style={{ display:"block", fontFamily:"'Cinzel',serif", fontSize:"0.6rem",
-            letterSpacing:"0.2em", textTransform:"uppercase",
-            color:"var(--text-soft)", marginBottom:"0.45rem" }}>
-            Your Name
-          </label>
-          <input type="text" className="plNameInp"
-            placeholder="So we know who to thank 🥂"
-            value={name} onChange={(e) => setName(e.target.value)}
-            style={inputStyle()} />
-        </div>
-
-        {/* ── SEARCH INPUT ── */}
-        <div className={`plR d3 ${vis ? "plV" : ""}`} style={{ marginBottom:"1rem" }}>
-          <label style={{ display:"block", fontFamily:"'Cinzel',serif", fontSize:"0.6rem",
-            letterSpacing:"0.2em", textTransform:"uppercase",
-            color:"var(--text-soft)", marginBottom:"0.45rem" }}>
-            Search a Song
-          </label>
-          <div style={{ position:"relative" }}>
-            <span style={{ position:"absolute", left:"1rem", top:"50%",
-              transform:"translateY(-50%)", pointerEvents:"none",
-              fontSize:"1rem", color:"var(--teal)" }}>
-              {searching ? "⏳" : "🔍"}
-            </span>
-            <input
-              type="text"
-              className="plSearchInp"
-              placeholder="Search songs — artist, Bollywood, English…"
-              value={query}
-              onChange={handleQ}
-
-              style={inputStyle({
-                paddingLeft:"3rem",
-                border:`1.5px solid ${searching ? "var(--teal)" : "rgba(200,150,60,0.3)"}`,
-                borderRadius:"14px",
-                boxShadow: searching ? "0 0 0 3px rgba(26,107,107,0.1)" : "none",
-
-              })}
-            />
-          </div>
-          <div style={{ display:"flex", alignItems:"center", gap:"0.4rem", marginTop:"0.45rem" }}>
-            <div style={{ width:"7px", height:"7px", borderRadius:"50%",
-              background:"#1DB954", boxShadow:"0 0 6px rgba(29,185,84,0.5)" }} />
-            <span style={{ fontSize:"0.65rem", color:"var(--text-muted)" }}>
-              Music search ready
-            </span>
-          </div>
-        </div>
-
-        {/* ── SEARCH RESULTS ── */}
-        {results.length > 0 && (
+        {/* ── SHARED LIST MODAL ── */}
+        {showShared && (
           <div style={{
-            marginBottom:"2rem", borderRadius:"18px", overflow:"hidden",
+            marginBottom:"2.5rem", borderRadius:"20px", overflow:"hidden",
             border:"1px solid rgba(26,107,107,0.2)",
-            background:"rgba(255,255,255,0.82)", backdropFilter:"blur(16px)",
-            boxShadow:"0 8px 40px rgba(26,107,107,0.08)",
+            background:"rgba(255,255,255,0.9)", backdropFilter:"blur(20px)",
+            boxShadow:"0 12px 50px rgba(26,107,107,0.1)",
           }}>
-            <div style={{ padding:"0.65rem 1.1rem",
+            {/* header */}
+            <div style={{
+              padding:"1rem 1.3rem",
+              background:"linear-gradient(135deg,rgba(26,107,107,0.08),rgba(200,150,60,0.05))",
               borderBottom:"1px solid rgba(26,107,107,0.1)",
-              background:"rgba(26,107,107,0.04)",
-              display:"flex", alignItems:"center", gap:"0.6rem" }}>
-              <EqBars n={4} h={14} active color="var(--teal)" />
-              <span style={{ fontFamily:"'Cinzel',serif", fontSize:"0.58rem",
-                letterSpacing:"0.22em", textTransform:"uppercase", color:"var(--teal)" }}>
-                Song Results
-              </span>
-            </div>
-
-            {results.map((t, ri) => {
-              const justAdded = added === t.id;
-              const inList    = songs.some((s) => s.id === t.id);
-              return (
-                <div key={t.id} className="plResultRow"
-                  style={{ display:"flex", alignItems:"center", gap:"0.85rem",
-                    padding:"0.75rem 1.1rem", background:"transparent",
-                    borderBottom: ri < results.length - 1
-                      ? "1px solid rgba(200,150,60,0.1)" : "none" }}>
-
-                  {t.album.images?.[0]?.url
-                    ? <img src={t.album.images[0].url} alt=""
-                        style={{ width:"44px", height:"44px", borderRadius:"8px",
-                          objectFit:"cover", flexShrink:0,
-                          boxShadow:"0 2px 10px rgba(26,107,107,0.18)" }} />
-                    : <div style={{ width:"44px", height:"44px", borderRadius:"8px",
-                        flexShrink:0, background:"rgba(26,107,107,0.08)",
-                        display:"flex", alignItems:"center",
-                        justifyContent:"center", fontSize:"1.2rem" }}>🎵</div>
-                  }
-
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <p style={{ fontFamily:"'Playfair Display',serif", fontSize:"0.9rem",
-                      color:"var(--text-dark)", fontWeight:500,
-                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                      {t.name}
-                    </p>
-                    <p style={{ fontSize:"0.71rem", color:"var(--text-soft)", marginTop:"2px",
-                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                      {t.artists.map((a) => a.name).join(", ")} · {t.album.name}
-                    </p>
-                  </div>
-
-                  <span className="plSmShow" style={{ display:"none",
-                    fontSize:"0.7rem", color:"var(--text-muted)", flexShrink:0 }}>
-                    {fmt(t.duration_ms)}
-                  </span>
-
-                  <a href={t.external_urls.spotify || "#"} target="_blank" rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    style={{ flexShrink:0, opacity:0.5, transition:"opacity .2s" }}
-                    onMouseEnter={(e) => e.currentTarget.style.opacity="1"}
-                    onMouseLeave={(e) => e.currentTarget.style.opacity="0.5"}>
-                    <MusicIcon size={17} />
-                  </a>
-
-                  <button onClick={() => addTrack(t)} style={{
-                    flexShrink:0, fontSize:"0.68rem", padding:"0.4rem 0.9rem",
-                    borderRadius:"20px", cursor:"pointer", fontFamily:"'Cinzel',serif",
-                    letterSpacing:"0.1em", fontWeight:600, minWidth:"60px",
-                    transition:"all .2s",
-                    background: justAdded || inList
-                      ? "rgba(26,107,107,0.12)"
-                      : "linear-gradient(135deg, var(--teal), #0D4040)",
-                    color:  justAdded || inList ? "var(--teal)" : "white",
-                    border: justAdded || inList ? "1px solid rgba(26,107,107,0.35)" : "none",
-                    boxShadow: justAdded || inList ? "none" : "0 3px 12px rgba(26,107,107,0.3)",
-                  }}>
-                    {justAdded ? "✓ Done!" : inList ? "✓ Added" : saving ? "…" : "+ Add"}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* ── SONG LIST ── */}
-        {songs.length > 0 && (
-          <div className={`plR d4 ${vis ? "plV" : ""}`}>
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-              marginBottom:"1rem", flexWrap:"wrap", gap:"0.6rem" }}>
+              display:"flex", alignItems:"center", justifyContent:"space-between",
+              flexWrap:"wrap", gap:"0.5rem",
+            }}>
               <div style={{ display:"flex", alignItems:"center", gap:"0.7rem" }}>
-                <EqBars n={4} h={20} active color="var(--teal)" />
+                <EqBars n={4} h={18} active color="var(--teal)" />
                 <div>
-                  <p style={{ fontFamily:"'Playfair Display',serif", fontSize:"1.1rem",
+                  <p style={{ fontFamily:"'Playfair Display',serif", fontSize:"1rem",
                     color:"var(--text-dark)", fontWeight:400 }}>
-                    Guest Suggestions
+                    Wedding Playlist
                   </p>
-                  <p style={{ fontSize:"0.68rem", color:"var(--text-muted)", marginTop:"1px" }}>
-                    {songs.length} track{songs.length !== 1 ? "s" : ""} &amp; counting 🎉
-                  </p>
+                  {!loadingShared && (
+                    <p style={{ fontSize:"0.65rem", color:"var(--text-muted)", marginTop:"1px" }}>
+                      {sharedSongs.length} song{sharedSongs.length !== 1 ? "s" : ""} from your guests
+                    </p>
+                  )}
                 </div>
               </div>
-              <button onClick={copyDJ} style={{
-                fontSize:"0.65rem", padding:"0.42rem 1rem", borderRadius:"20px",
-                fontFamily:"'Cinzel',serif", letterSpacing:"0.12em",
-                cursor:"pointer", transition:"all .2s",
-                background: copied ? "rgba(26,107,107,0.12)" : "rgba(200,150,60,0.1)",
-                border: copied
-                  ? "1px solid rgba(26,107,107,0.35)"
-                  : "1px solid rgba(200,150,60,0.3)",
-                color: copied ? "var(--teal)" : "var(--gold-dark)",
-              }}>
-                {copied ? "✓ Copied!" : "📋 Copy for DJ"}
-              </button>
+              <div style={{ display:"flex", gap:"0.6rem", alignItems:"center" }}>
+                {sharedSongs.length > 0 && (
+                  <button onClick={copyDJ} style={{
+                    fontSize:"0.62rem", padding:"0.38rem 0.9rem", borderRadius:"20px",
+                    fontFamily:"'Cinzel',serif", letterSpacing:"0.1em", cursor:"pointer",
+                    transition:"all .2s",
+                    background: copied ? "rgba(26,107,107,0.12)" : "rgba(200,150,60,0.1)",
+                    border: copied ? "1px solid rgba(26,107,107,0.35)" : "1px solid rgba(200,150,60,0.3)",
+                    color: copied ? "var(--teal)" : "var(--gold-dark)",
+                  }}>
+                    {copied ? "✓ Copied!" : "📋 Copy for DJ"}
+                  </button>
+                )}
+                <button onClick={() => setShowShared(false)} style={{
+                  background:"none", border:"none", cursor:"pointer",
+                  fontSize:"1rem", color:"var(--text-muted)", padding:"0 4px",
+                  lineHeight:1,
+                }}>✕</button>
+              </div>
             </div>
 
-            <div style={{ display:"flex", flexDirection:"column", gap:"0.5rem" }}>
-              {songs.map((s, i) => (
-                <div key={s.id} className="plSongRow plSlide"
-                  style={{ display:"flex", alignItems:"center", gap:"0.75rem",
-                    padding:"0.7rem 0.9rem", borderRadius:"14px",
-                    background:"rgba(255,255,255,0.72)", backdropFilter:"blur(8px)",
-                    border:"1px solid rgba(200,150,60,0.15)",
-                    animationDelay:`${i * 0.04}s` }}>
+            {/* content */}
+            <div style={{ padding:"1rem", maxHeight:"360px", overflowY:"auto" }}>
+              {loadingShared ? (
+                <div style={{ textAlign:"center", padding:"2rem",
+                  fontFamily:"'Playfair Display',serif", fontStyle:"italic",
+                  color:"var(--text-muted)" }}>
+                  Loading playlist…
+                </div>
+              ) : sharedSongs.length === 0 ? (
+                <div style={{ textAlign:"center", padding:"2rem",
+                  fontFamily:"'Playfair Display',serif", fontStyle:"italic",
+                  color:"var(--text-muted)" }}>
+                  No songs yet — be the first to submit! 🎶
+                </div>
+              ) : (
+                <div style={{ display:"flex", flexDirection:"column", gap:"0.5rem" }}>
+                  {sharedSongs.map((s, i) => (
+                    <TrackRow key={s.id + i} track={s} index={i} rightSlot={null} />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
-                  <span style={{ fontSize:"0.65rem", color:"var(--text-muted)",
-                    flexShrink:0, width:"16px", textAlign:"right",
-                    fontFamily:"'Cinzel',serif" }}>{i + 1}</span>
+        {/* ── SUBMITTED STATE ── */}
+        {submitted ? (
+          <div className={`plR d2 ${vis ? "plV" : ""}`} style={{
+            textAlign:"center", padding:"3rem 1.5rem",
+            borderRadius:"20px",
+            background:"linear-gradient(135deg,rgba(26,107,107,0.07),rgba(200,150,60,0.05))",
+            border:"1px solid rgba(26,107,107,0.2)",
+          }}>
+            <div style={{ fontSize:"3rem", marginBottom:"1rem" }}>🎉</div>
+            <p style={{ fontFamily:"'Playfair Display',serif", fontSize:"1.3rem",
+              color:"var(--text-dark)", fontWeight:400 }}>
+              Thank you, {name.trim() || "dear guest"}!
+            </p>
+            <p style={{ fontFamily:"'EB Garamond',serif", fontStyle:"italic",
+              fontSize:"1rem", color:"var(--text-soft)", marginTop:"0.5rem" }}>
+              Your songs have been added to the wedding playlist 💛
+            </p>
+            <button
+              onClick={() => { setSubmitted(false); setName(""); }}
+              style={{
+                marginTop:"1.5rem", background:"transparent",
+                border:"1px solid rgba(26,107,107,0.3)", borderRadius:"30px",
+                padding:"0.55rem 1.5rem", fontFamily:"'Cinzel',serif",
+                fontSize:"0.65rem", letterSpacing:"0.2em",
+                color:"var(--teal)", cursor:"pointer",
+              }}
+            >
+              Add More Songs
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* ── YOUR NAME ── */}
+            <div className={`plR d2 ${vis ? "plV" : ""}`} style={{ marginBottom:"0.9rem" }}>
+              <label style={{ display:"block", fontFamily:"'Cinzel',serif", fontSize:"0.6rem",
+                letterSpacing:"0.2em", textTransform:"uppercase",
+                color:"var(--text-soft)", marginBottom:"0.45rem" }}>
+                Your Name
+              </label>
+              <input type="text" className="plName"
+                placeholder="So we know who suggested it 🥂"
+                value={name} onChange={e => setName(e.target.value)}
+                style={inputStyle()} />
+            </div>
 
-                  {s.image
-                    ? <img src={s.image} alt="" style={{ width:"40px", height:"40px",
-                        borderRadius:"7px", objectFit:"cover", flexShrink:0,
-                        boxShadow:"0 2px 8px rgba(26,107,107,0.15)" }} />
-                    : <div style={{ width:"40px", height:"40px", borderRadius:"7px",
-                        flexShrink:0, background:"rgba(26,107,107,0.07)",
-                        display:"flex", alignItems:"center",
-                        justifyContent:"center", fontSize:"0.9rem" }}>🎵</div>
-                  }
+            {/* ── SEARCH ── */}
+            <div className={`plR d3 ${vis ? "plV" : ""}`} style={{ marginBottom:"1rem" }}>
+              <label style={{ display:"block", fontFamily:"'Cinzel',serif", fontSize:"0.6rem",
+                letterSpacing:"0.2em", textTransform:"uppercase",
+                color:"var(--text-soft)", marginBottom:"0.45rem" }}>
+                Search a Song
+              </label>
+              <div style={{ position:"relative" }}>
+                <span style={{ position:"absolute", left:"1rem", top:"50%",
+                  transform:"translateY(-50%)", pointerEvents:"none",
+                  fontSize:"1rem", color:"var(--teal)" }}>
+                  {searching ? "⏳" : "🔍"}
+                </span>
+                <input type="text" className="plSrch"
+                  placeholder="Search songs — Bollywood, English, any language…"
+                  value={query} onChange={handleQ}
+                  style={inputStyle({
+                    paddingLeft:"3rem",
+                    border:`1.5px solid ${searching ? "var(--teal)" : "rgba(200,150,60,0.3)"}`,
+                    borderRadius:"14px",
+                    boxShadow: searching ? "0 0 0 3px rgba(26,107,107,0.1)" : "none",
+                  })} />
+              </div>
+            </div>
 
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <p style={{ fontFamily:"'Playfair Display',serif", fontSize:"0.86rem",
-                      color:"var(--text-dark)",
-                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                      {s.name}
-                    </p>
-                    <p style={{ fontSize:"0.69rem", color:"var(--text-soft)", marginTop:"1px",
-                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                      {s.artist}
-                    </p>
-                  </div>
-
-                  <div className="plSmShow" style={{ display:"none",
-                    textAlign:"right", flexShrink:0 }}>
-                    <p style={{ fontSize:"0.65rem", color:"var(--teal)" }}>{s.by}</p>
-                    <p style={{ fontSize:"0.58rem", color:"var(--text-muted)" }}>{s.at}</p>
-                  </div>
-
-                  <span className="plSmShow" style={{ display:"none",
-                    fontSize:"0.68rem", color:"var(--text-muted)", flexShrink:0 }}>
-                    {s.duration}
+            {/* ── SEARCH RESULTS ── */}
+            {results.length > 0 && (
+              <div style={{
+                marginBottom:"1.5rem", borderRadius:"18px", overflow:"hidden",
+                border:"1px solid rgba(26,107,107,0.2)",
+                background:"rgba(255,255,255,0.85)", backdropFilter:"blur(16px)",
+                boxShadow:"0 8px 40px rgba(26,107,107,0.08)",
+              }}>
+                <div style={{ padding:"0.65rem 1.1rem",
+                  borderBottom:"1px solid rgba(26,107,107,0.1)",
+                  background:"rgba(26,107,107,0.04)",
+                  display:"flex", alignItems:"center", gap:"0.6rem" }}>
+                  <EqBars n={4} h={14} active color="var(--teal)" />
+                  <span style={{ fontFamily:"'Cinzel',serif", fontSize:"0.58rem",
+                    letterSpacing:"0.22em", textTransform:"uppercase", color:"var(--teal)" }}>
+                    Search Results
                   </span>
+                </div>
 
-                  <a href={s.url} target="_blank" rel="noopener noreferrer"
-                    style={{ flexShrink:0, opacity:0.4, transition:"opacity .2s" }}
-                    onMouseEnter={(e) => e.currentTarget.style.opacity="0.9"}
-                    onMouseLeave={(e) => e.currentTarget.style.opacity="0.4"}>
-                    <MusicIcon size={15} />
-                  </a>
+                {results.map((t, ri) => {
+                  const inQueue = queue.find(s => s.id === t.id);
+                  return (
+                    <div key={t.id} className="plResRow"
+                      style={{ display:"flex", alignItems:"center", gap:"0.85rem",
+                        padding:"0.75rem 1.1rem", background:"transparent",
+                        borderBottom: ri < results.length - 1
+                          ? "1px solid rgba(200,150,60,0.1)" : "none" }}>
 
-                  <button onClick={() => remove(s.id)} style={{
-                    background:"none", border:"none", cursor:"pointer",
-                    fontSize:"0.75rem", color:"rgba(196,96,122,0.3)",
-                    transition:"color .2s", padding:"0 2px", flexShrink:0 }}
-                    onMouseEnter={(e) => e.currentTarget.style.color="rgba(196,96,122,0.75)"}
-                    onMouseLeave={(e) => e.currentTarget.style.color="rgba(196,96,122,0.3)"}>
-                    ✕
+                      {t.image
+                        ? <img src={t.image} alt="" style={{ width:"44px", height:"44px",
+                            borderRadius:"8px", objectFit:"cover", flexShrink:0,
+                            boxShadow:"0 2px 10px rgba(26,107,107,0.18)" }} />
+                        : <div style={{ width:"44px", height:"44px", borderRadius:"8px",
+                            flexShrink:0, background:"rgba(26,107,107,0.08)",
+                            display:"flex", alignItems:"center",
+                            justifyContent:"center", fontSize:"1.2rem" }}>🎵</div>
+                      }
+
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <p style={{ fontFamily:"'Playfair Display',serif", fontSize:"0.9rem",
+                          color:"var(--text-dark)", fontWeight:500,
+                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                          {t.name}
+                        </p>
+                        <p style={{ fontSize:"0.71rem", color:"var(--text-soft)", marginTop:"2px",
+                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                          {t.artist} · {fmt(t.duration_ms)}
+                        </p>
+                      </div>
+
+                      <a href={t.url} target="_blank" rel="noopener noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        style={{ flexShrink:0, opacity:0.45, transition:"opacity .2s" }}
+                        onMouseEnter={e => e.currentTarget.style.opacity="1"}
+                        onMouseLeave={e => e.currentTarget.style.opacity="0.45"}>
+                        <MusicIcon size={17} />
+                      </a>
+
+                      <button onClick={() => addToQueue(t)} style={{
+                        flexShrink:0, fontSize:"0.68rem", padding:"0.4rem 0.9rem",
+                        borderRadius:"20px", cursor:"pointer",
+                        fontFamily:"'Cinzel',serif", letterSpacing:"0.1em",
+                        fontWeight:600, minWidth:"60px", transition:"all .2s",
+                        background: inQueue
+                          ? "rgba(26,107,107,0.12)"
+                          : "linear-gradient(135deg, var(--teal), #0D4040)",
+                        color:  inQueue ? "var(--teal)" : "white",
+                        border: inQueue ? "1px solid rgba(26,107,107,0.35)" : "none",
+                        boxShadow: inQueue ? "none" : "0 3px 12px rgba(26,107,107,0.3)",
+                      }}>
+                        {inQueue ? "✓ In Queue" : "+ Add"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ── LOCAL QUEUE ── */}
+            {queue.length > 0 && (
+              <div className={`plR d4 ${vis ? "plV" : ""}`} style={{ marginBottom:"1.5rem" }}>
+
+                {/* queue header */}
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+                  marginBottom:"0.85rem", flexWrap:"wrap", gap:"0.5rem" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:"0.6rem" }}>
+                    <EqBars n={4} h={18} active color="var(--teal)" />
+                    <div>
+                      <p style={{ fontFamily:"'Playfair Display',serif", fontSize:"1rem",
+                        color:"var(--text-dark)", fontWeight:400 }}>
+                        Your Queue
+                      </p>
+                      <p style={{ fontSize:"0.65rem", color:"var(--text-muted)", marginTop:"1px" }}>
+                        {queue.length} song{queue.length !== 1 ? "s" : ""} ready to submit
+                      </p>
+                    </div>
+                  </div>
+                  <button onClick={() => setQueue([])} style={{
+                    fontSize:"0.62rem", padding:"0.35rem 0.8rem", borderRadius:"20px",
+                    fontFamily:"'Cinzel',serif", letterSpacing:"0.1em", cursor:"pointer",
+                    background:"rgba(196,96,122,0.08)",
+                    border:"1px solid rgba(196,96,122,0.25)",
+                    color:"var(--rose)", transition:"all .2s",
+                  }}>
+                    Clear All
                   </button>
                 </div>
-              ))}
-            </div>
 
-            <div style={{ marginTop:"1.4rem", textAlign:"center" }}>
-              <a href="https://spotify.com" target="_blank" rel="noopener noreferrer"
-                style={{ display:"inline-flex", alignItems:"center", gap:"0.4rem",
-                  textDecoration:"none", fontSize:"0.7rem", color:"var(--text-muted)" }}>
-                Powered by <MusicIcon size={12} />
-                <span style={{ color:"var(--teal)", fontWeight:600 }}>iTunes</span>
-              </a>
-            </div>
-          </div>
-        )}
+                {/* queue tracks */}
+                <div style={{ display:"flex", flexDirection:"column", gap:"0.45rem",
+                  marginBottom:"1.2rem" }}>
+                  {queue.map((s, i) => (
+                    <TrackRow
+                      key={s.id}
+                      track={s}
+                      index={i}
+                      rightSlot={
+                        <button onClick={() => removeFromQueue(s.id)} style={{
+                          background:"none", border:"none", cursor:"pointer",
+                          fontSize:"0.8rem", color:"rgba(196,96,122,0.35)",
+                          transition:"color .2s", padding:"0 2px", flexShrink:0,
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.color="rgba(196,96,122,0.8)"}
+                        onMouseLeave={e => e.currentTarget.style.color="rgba(196,96,122,0.35)"}>
+                          ✕
+                        </button>
+                      }
+                    />
+                  ))}
+                </div>
 
-        {/* ── EMPTY STATE ── */}
-        {songs.length === 0 && results.length === 0 && (
-          <div className={`plR d4 ${vis ? "plV" : ""}`}
-            style={{ textAlign:"center", padding:"3rem 1rem" }}>
-            {loadingList && (
-              <p style={{ fontFamily:"'Playfair Display',serif", fontStyle:"italic",
-                fontSize:"1rem", color:"var(--text-muted)", marginBottom:"2rem" }}>
-                Loading playlist…
-              </p>
+                {/* SUBMIT BUTTON */}
+                <button
+                  onClick={submitPlaylist}
+                  disabled={submitting}
+                  style={{
+                    width:"100%", padding:"1rem",
+                    background: submitting
+                      ? "rgba(26,107,107,0.4)"
+                      : "linear-gradient(135deg, var(--teal), #0D4040)",
+                    color:"white", border:"none",
+                    fontFamily:"'Cinzel',serif", fontSize:"0.78rem",
+                    letterSpacing:"0.25em", textTransform:"uppercase",
+                    cursor: submitting ? "not-allowed" : "pointer",
+                    borderRadius:"40px",
+                    boxShadow:"0 4px 20px rgba(26,107,107,0.3)",
+                    transition:"all .3s",
+                  }}
+                  onMouseEnter={e => { if (!submitting) e.target.style.boxShadow="0 8px 30px rgba(26,107,107,0.45)"; }}
+                  onMouseLeave={e => { e.target.style.boxShadow="0 4px 20px rgba(26,107,107,0.3)"; }}
+                >
+                  {submitting ? "Submitting…" : `Submit ${queue.length} Song${queue.length !== 1 ? "s" : ""} to Playlist ✦`}
+                </button>
+              </div>
             )}
-            <div className="plSpin" style={{
-              width:"60px", height:"60px", borderRadius:"50%",
-              margin:"0 auto 1.2rem", opacity:0.7,
-              background:`conic-gradient(
-                var(--teal) 0deg 60deg, var(--parchment) 60deg 120deg,
-                var(--gold) 120deg 180deg, var(--parchment) 180deg 240deg,
-                var(--teal) 240deg 300deg, var(--parchment) 300deg 360deg)`,
-              boxShadow:"0 0 0 3px var(--ivory), 0 0 0 4px var(--gold-light), 0 4px 20px rgba(200,150,60,0.2)",
-              display:"flex", alignItems:"center", justifyContent:"center",
-            }}>
-              <div style={{ width:"14px", height:"14px", borderRadius:"50%",
-                background:"var(--ivory)", border:"2px solid var(--gold)" }} />
-            </div>
-            <p style={{ fontFamily:"'Playfair Display',serif", fontStyle:"italic",
-              fontSize:"1.1rem", color:"var(--text-soft)" }}>
-              The dancefloor is waiting…
-            </p>
-            <p style={{ fontSize:"0.82rem", color:"var(--text-muted)",
-              marginTop:"0.4rem", fontWeight:300 }}>
-              Be the first to drop a track and get the party started! 🕺
-            </p>
-            <div style={{ display:"flex", justifyContent:"center", gap:"5px", marginTop:"1.2rem" }}>
-              {[0,1,2,3,4].map((j) => (
-                <div key={j} style={{
-                  width:"6px", height:"6px", borderRadius:"50%",
-                  background:"var(--teal)", opacity:0.5,
-                  animation:`plEq ${0.45 + j * 0.1}s ${j * 0.09}s ease-in-out infinite alternate`,
-                }} />
-              ))}
-            </div>
-          </div>
+
+            {/* ── EMPTY STATE ── */}
+            {queue.length === 0 && results.length === 0 && (
+              <div className={`plR d4 ${vis ? "plV" : ""}`}
+                style={{ textAlign:"center", padding:"2.5rem 1rem" }}>
+                <div className="plSpin" style={{
+                  width:"56px", height:"56px", borderRadius:"50%",
+                  margin:"0 auto 1.1rem", opacity:0.65,
+                  background:`conic-gradient(
+                    var(--teal) 0deg 60deg, var(--parchment) 60deg 120deg,
+                    var(--gold) 120deg 180deg, var(--parchment) 180deg 240deg,
+                    var(--teal) 240deg 300deg, var(--parchment) 300deg 360deg)`,
+                  boxShadow:"0 0 0 3px var(--ivory), 0 0 0 4px var(--gold-light)",
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                }}>
+                  <div style={{ width:"13px", height:"13px", borderRadius:"50%",
+                    background:"var(--ivory)", border:"2px solid var(--gold)" }} />
+                </div>
+                <p style={{ fontFamily:"'Playfair Display',serif", fontStyle:"italic",
+                  fontSize:"1rem", color:"var(--text-soft)" }}>
+                  Search a song above to get started!
+                </p>
+                <p style={{ fontSize:"0.78rem", color:"var(--text-muted)",
+                  marginTop:"0.4rem", fontWeight:300 }}>
+                  Add multiple songs to your queue, then hit Submit 🎶
+                </p>
+                <div style={{ display:"flex", justifyContent:"center", gap:"5px", marginTop:"1.1rem" }}>
+                  {[0,1,2,3,4].map(j => (
+                    <div key={j} style={{
+                      width:"5px", height:"5px", borderRadius:"50%",
+                      background:"var(--teal)", opacity:0.45,
+                      animation:`plEq ${0.45 + j*0.1}s ${j*0.09}s ease-in-out infinite alternate`,
+                    }} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         )}
+
       </div>
     </section>
   );
