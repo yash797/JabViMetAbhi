@@ -1,25 +1,52 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 
 /* ══════════════════════════════════════════════════════════════
-   PLAYLIST — Spotify via Vercel serverless proxy
-   Calls /api/spotify which runs server-side on Vercel
-   Credentials stored in Vercel env vars — never in browser
+   PLAYLIST — Direct Spotify Client Credentials
+   Credentials hardcoded · Deployed on Vercel
+   Fixed: proper Base64 encoding, token caching, error states
    ══════════════════════════════════════════════════════════════ */
 
-const STORAGE_KEY = "va_wedding_playlist_v4";
-const PROXY = "/api/spotify";
+// ── YOUR SPOTIFY CREDENTIALS ──────────────────────────────────
+const CLIENT_ID     = "44c62ea96b5845a8b0b70151616aa252";
+const CLIENT_SECRET = "1a3a754cb2984977b7e789a98d59e9d0";
+// ─────────────────────────────────────────────────────────────
 
-/* ── Get token via Vercel proxy ── */
+const STORAGE_KEY = "va_wedding_playlist_v4";
+
+/* ── Encode credentials safely (handles special chars) ── */
+function toBase64(str) {
+  try {
+    // works in all modern browsers
+    return btoa(unescape(encodeURIComponent(str)));
+  } catch {
+    return btoa(str);
+  }
+}
+
+/* ── Get Spotify token directly ── */
 async function getToken() {
   try {
     const cached = sessionStorage.getItem("sp_tok_v2");
     const expiry  = sessionStorage.getItem("sp_exp_v2");
     if (cached && expiry && Date.now() < +expiry) return cached;
 
-    const res  = await fetch(`${PROXY}?action=token`);
-    const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+    const credentials = toBase64(`${CLIENT_ID}:${CLIENT_SECRET}`);
 
+    const res = await fetch("https://accounts.spotify.com/api/token", {
+      method: "POST",
+      headers: {
+        "Content-Type":  "application/x-www-form-urlencoded",
+        "Authorization": `Basic ${credentials}`,
+      },
+      body: "grant_type=client_credentials",
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error_description || `HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
     sessionStorage.setItem("sp_tok_v2", data.access_token);
     sessionStorage.setItem("sp_exp_v2", String(Date.now() + (data.expires_in - 60) * 1000));
     return data.access_token;
@@ -29,21 +56,23 @@ async function getToken() {
   }
 }
 
-/* ── Search via Vercel proxy ── */
+/* ── Search Spotify ── */
 async function searchSpotify(q, token) {
   if (!q.trim() || !token) return [];
   try {
-    const res  = await fetch(
-      `${PROXY}?action=search&q=${encodeURIComponent(q)}&token=${token}`
+    const res = await fetch(
+      `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track&limit=6&market=IN`,
+      { headers: { Authorization: `Bearer ${token}` } }
     );
-    const data = await res.json();
     if (res.status === 401) {
+      // token expired — clear cache and signal refresh needed
       sessionStorage.removeItem("sp_tok_v2");
       sessionStorage.removeItem("sp_exp_v2");
       return "EXPIRED";
     }
-    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
-    return Array.isArray(data) ? data : [];
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return data.tracks?.items || [];
   } catch (e) {
     console.error("[Spotify] Search error:", e.message);
     return [];
