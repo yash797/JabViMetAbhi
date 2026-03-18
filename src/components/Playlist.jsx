@@ -1,46 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 
 const STORAGE_KEY = "va_wedding_playlist_v4";
-const PROXY = "/api/spotify";
 
-/* Get token via Vercel proxy */
-async function getToken() {
+/* Single call to /api/spotify?q=... — server handles token internally */
+async function searchSpotify(q) {
+  if (!q.trim()) return [];
   try {
-    const cached = sessionStorage.getItem("sp_tok_v2");
-    const expiry  = sessionStorage.getItem("sp_exp_v2");
-    if (cached && expiry && Date.now() < +expiry) return cached;
-
-    const res  = await fetch(`${PROXY}?action=token`);
+    const res  = await fetch(`/api/spotify?q=${encodeURIComponent(q)}`);
     const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
-
-    sessionStorage.setItem("sp_tok_v2", data.access_token);
-    sessionStorage.setItem("sp_exp_v2", String(Date.now() + (data.expires_in - 60) * 1000));
-    return data.access_token;
-  } catch (e) {
-    console.error("[Spotify] Token error:", e.message);
-    return null;
-  }
-}
-
-/* Search via Vercel proxy - token sent in POST body to avoid URL length issues */
-async function searchSpotify(q, token) {
-  if (!q.trim() || !token) return [];
-  try {
-    const res = await fetch(
-      `${PROXY}?action=search&q=${encodeURIComponent(q)}`,
-      {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ token }),
-      }
-    );
-    const data = await res.json();
-    if (res.status === 401) {
-      sessionStorage.removeItem("sp_tok_v2");
-      sessionStorage.removeItem("sp_exp_v2");
-      return "EXPIRED";
-    }
     if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
     return Array.isArray(data) ? data : [];
   } catch (e) {
@@ -125,14 +92,11 @@ export default function Playlist() {
   const [query, setQuery]         = useState("");
   const [results, setResults]     = useState([]);
   const [searching, setSearching] = useState(false);
-  const [token, setToken]         = useState(null);
-  const [tokenStatus, setTokenStatus] = useState("loading"); // loading | ready | error
   const [songs, setSongs]         = useState([]);
   const [name, setName]           = useState("");
   const [added, setAdded]         = useState(null);
   const [copied, setCopied]       = useState(false);
-  const debRef  = useRef(null);
-  const tokenRef = useRef(null); // keep latest token accessible in callbacks
+  const debRef = useRef(null);
 
   /* load localStorage */
   useEffect(() => {
@@ -140,20 +104,6 @@ export default function Playlist() {
       const s = localStorage.getItem(STORAGE_KEY);
       if (s) setSongs(JSON.parse(s));
     } catch { /**/ }
-  }, []);
-
-  /* fetch token */
-  useEffect(() => {
-    setTokenStatus("loading");
-    getToken().then((tok) => {
-      if (tok) {
-        setToken(tok);
-        tokenRef.current = tok;
-        setTokenStatus("ready");
-      } else {
-        setTokenStatus("error");
-      }
-    });
   }, []);
 
   /* inject keyframes once */
@@ -209,22 +159,11 @@ export default function Playlist() {
     document.head.appendChild(s);
   }, []);
 
-  /* search with auto token refresh on 401 */
+  /* search */
   const doSearch = useCallback(async (q) => {
     if (!q.trim()) { setResults([]); return; }
     setSearching(true);
-
-    let tok = tokenRef.current;
-    let res = await searchSpotify(q, tok);
-
-    // token expired mid-session — refresh and retry once
-    if (res === "EXPIRED") {
-      tok = await getToken();
-      tokenRef.current = tok;
-      setToken(tok);
-      res = tok ? await searchSpotify(q, tok) : [];
-    }
-
+    const res = await searchSpotify(q);
     setResults(Array.isArray(res) ? res : []);
     setSearching(false);
   }, []);
@@ -280,7 +219,6 @@ export default function Playlist() {
     ...extra,
   });
 
-  const isReady = tokenStatus === "ready";
 
   return (
     <section ref={ref} id="playlist" style={{
@@ -348,28 +286,7 @@ export default function Playlist() {
         </div>
 
         {/* ── TOKEN ERROR BANNER ── */}
-        {tokenStatus === "error" && (
-          <div className={`plR d2 ${vis ? "plV" : ""}`} style={{
-            marginBottom:"1.5rem", padding:"1rem 1.3rem", borderRadius:"16px",
-            background:"linear-gradient(135deg,rgba(26,107,107,0.07),rgba(200,150,60,0.06))",
-            border:"1px solid rgba(26,107,107,0.2)", textAlign:"center",
-          }}>
-            <p style={{ fontSize:"0.78rem", lineHeight:1.65 }}>
-              <span style={{ fontFamily:"'Cinzel',serif", color:"var(--teal)",
-                letterSpacing:"0.1em", display:"block", marginBottom:"0.3rem" }}>
-                ⚙️ Spotify Not Connected
-              </span>
-              <span style={{ fontSize:"0.72rem", color:"var(--text-soft)" }}>
-                Check that <code style={{ background:"rgba(26,107,107,0.1)",
-                  color:"var(--teal)", padding:"1px 5px", borderRadius:"4px" }}>
-                  CLIENT_ID</code> and <code style={{ background:"rgba(26,107,107,0.1)",
-                  color:"var(--teal)", padding:"1px 5px", borderRadius:"4px" }}>
-                  CLIENT_SECRET</code> are correct in <code style={{ color:"var(--gold-dark)" }}>
-                  Playlist.jsx</code>
-              </span>
-            </p>
-          </div>
-        )}
+
 
         {/* ── NAME INPUT ── */}
         <div className={`plR d2 ${vis ? "plV" : ""}`} style={{ marginBottom:"0.9rem" }}>
@@ -400,38 +317,24 @@ export default function Playlist() {
             <input
               type="text"
               className="plSearchInp"
-              placeholder={
-                tokenStatus === "loading" ? "Connecting to Spotify…" :
-                tokenStatus === "error"   ? "Spotify unavailable" :
-                "Search Spotify — artist, song, vibe…"
-              }
+              placeholder="Search Spotify — artist, song, vibe…"
               value={query}
               onChange={handleQ}
-              disabled={!isReady}
+
               style={inputStyle({
                 paddingLeft:"3rem",
                 border:`1.5px solid ${searching ? "var(--teal)" : "rgba(200,150,60,0.3)"}`,
                 borderRadius:"14px",
                 boxShadow: searching ? "0 0 0 3px rgba(26,107,107,0.1)" : "none",
-                opacity: !isReady ? 0.6 : 1,
-                cursor: !isReady ? "not-allowed" : "text",
+
               })}
             />
           </div>
-          {/* status pill */}
           <div style={{ display:"flex", alignItems:"center", gap:"0.4rem", marginTop:"0.45rem" }}>
-            <div style={{
-              width:"7px", height:"7px", borderRadius:"50%", flexShrink:0,
-              background:
-                tokenStatus === "ready"   ? "#1DB954" :
-                tokenStatus === "loading" ? "var(--gold)" : "#E05555",
-              boxShadow:
-                tokenStatus === "ready" ? "0 0 6px rgba(29,185,84,0.6)" : "none",
-            }} />
+            <div style={{ width:"7px", height:"7px", borderRadius:"50%",
+              background:"#1DB954", boxShadow:"0 0 6px rgba(29,185,84,0.5)" }} />
             <span style={{ fontSize:"0.65rem", color:"var(--text-muted)" }}>
-              {tokenStatus === "ready"   ? "Connected to Spotify" :
-               tokenStatus === "loading" ? "Connecting…" :
-               "Connection failed — check credentials"}
+              Connected to Spotify
             </span>
           </div>
         </div>
