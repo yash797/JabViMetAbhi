@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 
-const STORAGE_KEY = "va_wedding_playlist_v4";
-
-/* iTunes Search API — free, no auth, no Spotify account needed */
+/* iTunes search + Upstash Redis shared playlist */
 async function searchTracks(q) {
   if (!q.trim()) return [];
   try {
@@ -14,6 +12,34 @@ async function searchTracks(q) {
     console.error("[Search] error:", e.message);
     return [];
   }
+}
+
+async function loadPlaylist() {
+  try {
+    const res  = await fetch("/api/spotify?action=playlist");
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch { return []; }
+}
+
+async function addToPlaylist(song) {
+  try {
+    const res  = await fetch("/api/spotify?action=add", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify(song),
+    });
+    const data = await res.json();
+    return Array.isArray(data) ? data : null;
+  } catch { return null; }
+}
+
+async function removeFromPlaylist(id) {
+  try {
+    const res  = await fetch(`/api/spotify?action=remove&id=${id}`, { method: "DELETE" });
+    const data = await res.json();
+    return Array.isArray(data) ? data : null;
+  } catch { return null; }
 }
 
 
@@ -96,17 +122,20 @@ export default function Playlist() {
   const [results, setResults]     = useState([]);
   const [searching, setSearching] = useState(false);
   const [songs, setSongs]         = useState([]);
+  const [loadingList, setLoadingList] = useState(true);
   const [name, setName]           = useState("");
   const [added, setAdded]         = useState(null);
+  const [saving, setSaving]       = useState(false);
   const [copied, setCopied]       = useState(false);
   const debRef = useRef(null);
 
-  /* load localStorage */
+  /* load shared playlist from server */
   useEffect(() => {
-    try {
-      const s = localStorage.getItem(STORAGE_KEY);
-      if (s) setSongs(JSON.parse(s));
-    } catch { /**/ }
+    setLoadingList(true);
+    loadPlaylist().then((data) => {
+      setSongs(data);
+      setLoadingList(false);
+    });
   }, []);
 
   /* inject keyframes once */
@@ -178,7 +207,7 @@ export default function Playlist() {
     debRef.current = setTimeout(() => doSearch(val), 400);
   };
 
-  const addTrack = (t) => {
+  const addTrack = async (t) => {
     if (songs.find((s) => s.id === t.id)) {
       setAdded(t.id); setTimeout(() => setAdded(null), 1800); return;
     }
@@ -189,21 +218,23 @@ export default function Playlist() {
       album:    t.album.name,
       image:    t.album.images?.[1]?.url || t.album.images?.[0]?.url || "",
       duration: fmt(t.duration_ms),
-      url:      t.external_urls.spotify || t.external_urls?.appleMusic || "#",
+      url:      t.external_urls.spotify || "#",
       by:       name.trim() || "A Guest",
       at:       new Date().toLocaleDateString("en-IN", { day:"numeric", month:"short" }),
     };
-    const updated = [entry, ...songs];
-    setSongs(updated);
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(updated)); } catch { /**/ }
+    setSaving(true);
+    const updated = await addToPlaylist(entry);
+    if (updated) setSongs(updated);
+    else setSongs(prev => [entry, ...prev]); // fallback
+    setSaving(false);
     setAdded(t.id); setTimeout(() => setAdded(null), 2000);
     setQuery(""); setResults([]);
   };
 
-  const remove = (id) => {
-    const u = songs.filter((s) => s.id !== id);
-    setSongs(u);
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(u)); } catch { /**/ }
+  const remove = async (id) => {
+    const updated = await removeFromPlaylist(id);
+    if (updated) setSongs(updated);
+    else setSongs(prev => prev.filter(s => s.id !== id)); // fallback
   };
 
   const copyDJ = () => {
@@ -419,7 +450,7 @@ export default function Playlist() {
                     border: justAdded || inList ? "1px solid rgba(26,107,107,0.35)" : "none",
                     boxShadow: justAdded || inList ? "none" : "0 3px 12px rgba(26,107,107,0.3)",
                   }}>
-                    {justAdded ? "✓ Done!" : inList ? "✓ Added" : "+ Add"}
+                    {justAdded ? "✓ Done!" : inList ? "✓ Added" : saving ? "…" : "+ Add"}
                   </button>
                 </div>
               );
@@ -538,6 +569,12 @@ export default function Playlist() {
         {songs.length === 0 && results.length === 0 && (
           <div className={`plR d4 ${vis ? "plV" : ""}`}
             style={{ textAlign:"center", padding:"3rem 1rem" }}>
+            {loadingList && (
+              <p style={{ fontFamily:"'Playfair Display',serif", fontStyle:"italic",
+                fontSize:"1rem", color:"var(--text-muted)", marginBottom:"2rem" }}>
+                Loading playlist…
+              </p>
+            )}
             <div className="plSpin" style={{
               width:"60px", height:"60px", borderRadius:"50%",
               margin:"0 auto 1.2rem", opacity:0.7,
