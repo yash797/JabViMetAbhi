@@ -2,10 +2,11 @@ import React, { useState, useEffect } from "react";
 import Monogram from "./av_monogram.png";
 
 const links = [
-  { label: "Events",   href: "#events"    },
-  { label: "Couple",   href: "#couple"    },
-  { label: "Attire",   href: "#dresscode" },
-  { label: "Venue",    href: "#venue"     },
+  { label: "Events", href: "#events" },
+  { label: "Couple", href: "#couple" },
+  { label: "Playlist", href: "#playlist" },
+  { label: "Attire", href: "#dresscode" },
+  { label: "Venue", href: "#venue" },
 ];
 
 export default function Navbar() {
@@ -96,7 +97,10 @@ export default function Navbar() {
         className="md:hidden overflow-hidden transition-all duration-300"
         style={{ maxHeight: open ? "260px" : "0" }}
       >
-        <div className="px-6 pb-4 pt-1 flex flex-col gap-3 border-t" style={{ borderColor: "var(--border-gold)" }}>
+        <div
+          className="px-6 pb-4 pt-1 flex flex-col gap-3 border-t"
+          style={{ borderColor: "var(--border-gold)" }}
+        >
           {links.map((l) => (
             <button
               key={l.href}

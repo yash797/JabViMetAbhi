@@ -3,6 +3,8 @@ import Navbar from "./components/Navbar";
 import Hero from "./components/Hero";
 import Countdown from "./components/Countdown";
 import Events from "./components/Events";
+import Playlist from "./components/Playlist";
+
 import {
   SummerBand,
   PeacockBand,
@@ -24,6 +26,7 @@ export default function App() {
       <PeacockBand />
       <Couple />
       <DressCode />
+      <Playlist />
       <Venue />
       <HowToReach />
       <Footer />
