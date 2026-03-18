@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { Redis } from "@upstash/redis";
 
 /* ══════════════════════════════════════════════════════════════
    PLAYLIST
@@ -11,54 +12,16 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
    ══════════════════════════════════════════════════════════════ */
 
 // ── Keys ─────────────────────────────────────────────────────
-const LOCAL_KEY     = "va_local_queue";
-const PLAYLIST_KEY  = "va_wedding_songs";
+const LOCAL_KEY    = "va_local_queue";
+const PLAYLIST_KEY = "va_wedding_songs";
 
-// Upstash REST — CORS fully supported for both read and write
-const UPSTASH_URL   = process.env.REACT_APP_UPSTASH_REDIS_REST_URL;
-const UPSTASH_TOKEN = process.env.REACT_APP_UPSTASH_REDIS_REST_TOKEN;
+// ── Upstash Redis client (uses @upstash/redis SDK) ───────────
+const redis = new Redis({
+  url:   'https://included-shad-76730.upstash.io',
+  token: 'gQAAAAAAASu6AAIncDE3NzNjMjRmYmViNjQ0NGE5YjkwN2Q2NzExYzg4YWViY3AxNzY3MzA'
+});
 
-/* ── Upstash direct helpers ── */
-async function redisGet(key) {
-  try {
-    const res  = await fetch(`${UPSTASH_URL}/get/${key}`, {
-      headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
-    });
-    const data = await res.json();
-    if (!data.result) return [];
-    // handle both single and double stringified values
-    let parsed = data.result;
-    if (typeof parsed === "string") parsed = JSON.parse(parsed);
-    if (typeof parsed === "string") parsed = JSON.parse(parsed);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (e) {
-    console.error("[redisGet] error:", e.message);
-    return [];
-  }
-}
-
-async function redisSet(key, value) {
-  try {
-    // Upstash REST: POST to /pipeline with array of commands
-    const res = await fetch(`${UPSTASH_URL}/pipeline`, {
-      method:  "POST",
-      headers: {
-        Authorization:  `Bearer ${UPSTASH_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify([["SET", key, JSON.stringify(value)]]),
-    });
-    const data = await res.json();
-    console.log("[redisSet] response:", JSON.stringify(data));
-    // pipeline returns array of results e.g. [{"result":"OK"}]
-    return Array.isArray(data) && data[0]?.result === "OK";
-  } catch (e) {
-    console.error("[redisSet] error:", e.message);
-    return false;
-  }
-}
-
-/* ── Search via Deezer with corsproxy (only for search, no auth needed) ── */
+/* ── Search via Deezer with corsproxy ── */
 async function searchTracks(q) {
   if (!q.trim()) return [];
   try {
@@ -81,24 +44,29 @@ async function searchTracks(q) {
   }
 }
 
-/* ── Load playlist directly from Upstash ── */
+/* ── Load playlist from Upstash using SDK ── */
 async function loadSharedPlaylist() {
-  const songs = await redisGet(PLAYLIST_KEY);
-  return Array.isArray(songs) ? songs : [];
+  try {
+    const songs = await redis.get(PLAYLIST_KEY);
+    return Array.isArray(songs) ? songs : [];
+  } catch (e) {
+    console.error("[loadPlaylist] error:", e.message);
+    return [];
+  }
 }
 
-/* ── Submit queue directly to Upstash ── */
+/* ── Submit queue to Upstash using SDK ── */
 async function submitQueue(newSongs) {
   try {
-    const existing    = await redisGet(PLAYLIST_KEY);
-    const existingIds = new Set((existing || []).map(s => s.id));
+    const existing    = await redis.get(PLAYLIST_KEY) || [];
+    const existingIds = new Set(existing.map(s => s.id));
     const toAdd       = newSongs.filter(s => !existingIds.has(s.id));
     const duplicates  = newSongs.filter(s =>  existingIds.has(s.id));
-    const updated     = [...(existing || []), ...toAdd];
-    const ok          = await redisSet(PLAYLIST_KEY, updated);
-    if (!ok) return { error: "Failed to save" };
+    const updated     = [...existing, ...toAdd];
+    await redis.set(PLAYLIST_KEY, updated);
     return { success: true, added: toAdd.length, duplicates: duplicates.length, total: updated.length };
   } catch (e) {
+    console.error("[submitQueue] error:", e.message);
     return { error: e.message };
   }
 }
