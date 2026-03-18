@@ -344,7 +344,6 @@ export default function Hero() {
           </p> */}
         </div>
 
-        {/* Summer pill */}
         <div
           className="
     hero-pill
