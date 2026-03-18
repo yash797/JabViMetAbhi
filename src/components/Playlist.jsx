@@ -10,80 +10,58 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
    5. Duplicate detection with toast error
    ══════════════════════════════════════════════════════════════ */
 
-// ── Keys ─────────────────────────────────────────────────────
+// ── Keys & endpoints ─────────────────────────────────────────
 const LOCAL_KEY     = "va_local_queue";
 const PLAYLIST_KEY  = "va_wedding_songs";
+const API           = "/api/spotify";
 
-// Upstash REST — CORS fully supported for both read and write
+// Upstash direct (CORS-enabled) — used for READ only
 const UPSTASH_URL   = process.env.REACT_APP_UPSTASH_REDIS_REST_URL;
 const UPSTASH_TOKEN = process.env.REACT_APP_UPSTASH_REDIS_REST_TOKEN;
 
-/* ── Upstash direct helpers ── */
-async function redisGet(key) {
-  try {
-    const res  = await fetch(`${UPSTASH_URL}/get/${key}`, {
-      headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
-    });
-    const data = await res.json();
-    return data.result ? JSON.parse(data.result) : [];
-  } catch { return []; }
-}
-
-async function redisSet(key, value) {
-  try {
-    const res = await fetch(`${UPSTASH_URL}/set/${key}`, {
-      method:  "POST",
-      headers: {
-        Authorization:  `Bearer ${UPSTASH_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(JSON.stringify(value)),
-    });
-    const data = await res.json();
-    return data.result === "OK";
-  } catch { return false; }
-}
-
-/* ── Search via Deezer with corsproxy (only for search, no auth needed) ── */
+/* ── Search via Vercel function ── */
 async function searchTracks(q) {
   if (!q.trim()) return [];
   try {
-    const res  = await fetch(
-      `https://corsproxy.io/?${encodeURIComponent(`https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=6`)}`
-    );
-    const data = await res.json();
-    return (data.data || []).map(t => ({
-      id:          String(t.id),
-      name:        t.title,
-      artist:      t.artist?.name || "",
-      album:       t.album?.title || "",
-      image:       t.album?.cover_medium || "",
-      duration_ms: (t.duration || 0) * 1000,
-      url:         t.link || "#",
-    }));
+    const res  = await fetch(`${API}?q=${encodeURIComponent(q)}`);
+    const text = await res.text();
+    if (text.trim().startsWith("<")) throw new Error("API not available");
+    const data = JSON.parse(text);
+    if (data.error) throw new Error(data.error);
+    return Array.isArray(data) ? data : [];
   } catch (e) {
     console.error("[Search] error:", e.message);
     return [];
   }
 }
 
-/* ── Load playlist directly from Upstash ── */
+/* ── Load playlist DIRECTLY from Upstash (CORS supported for reads) ── */
 async function loadSharedPlaylist() {
-  const songs = await redisGet(PLAYLIST_KEY);
-  return Array.isArray(songs) ? songs : [];
+  try {
+    const res  = await fetch(`${UPSTASH_URL}/get/${PLAYLIST_KEY}`, {
+      headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
+    });
+    const data = await res.json();
+    if (!data.result) return [];
+    const songs = JSON.parse(data.result);
+    return Array.isArray(songs) ? songs : [];
+  } catch (e) {
+    console.error("[Playlist load] error:", e.message);
+    return [];
+  }
 }
 
-/* ── Submit queue directly to Upstash ── */
-async function submitQueue(newSongs) {
+/* ── Submit queue via Vercel function (server-side write to Redis) ── */
+async function submitQueue(songs) {
   try {
-    const existing    = await redisGet(PLAYLIST_KEY);
-    const existingIds = new Set((existing || []).map(s => s.id));
-    const toAdd       = newSongs.filter(s => !existingIds.has(s.id));
-    const duplicates  = newSongs.filter(s =>  existingIds.has(s.id));
-    const updated     = [...(existing || []), ...toAdd];
-    const ok          = await redisSet(PLAYLIST_KEY, updated);
-    if (!ok) return { error: "Failed to save" };
-    return { success: true, added: toAdd.length, duplicates: duplicates.length, total: updated.length };
+    const res  = await fetch(`${API}?action=submit`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ songs }),
+    });
+    const text = await res.text();
+    if (text.trim().startsWith("<")) throw new Error("Submit API not available");
+    return JSON.parse(text);
   } catch (e) {
     return { error: e.message };
   }
