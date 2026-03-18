@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Redis } from "@upstash/redis";
-
+import { Redis } from '@upstash/redis'
 /* ══════════════════════════════════════════════════════════════
    PLAYLIST
    Flow:
@@ -11,40 +10,36 @@ import { Redis } from "@upstash/redis";
    5. Duplicate detection with toast error
    ══════════════════════════════════════════════════════════════ */
 
-// ── Keys ─────────────────────────────────────────────────────
-const LOCAL_KEY    = "va_local_queue";
-const PLAYLIST_KEY = "va_wedding_songs";
+// ── Keys & endpoints ─────────────────────────────────────────
+const LOCAL_KEY     = "va_local_queue";
+const PLAYLIST_KEY  = "va_wedding_songs";
+const API           = "/api/spotify";
 
-// ── Upstash Redis client (uses @upstash/redis SDK) ───────────
+// Upstash direct (CORS-enabled) — used for READ only
+// const UPSTASH_URL_LOAD="https://included-shad-76730.upstash.io"
+// const UPSTASH_TOKEN_LOAD="gQAAAAAAASu6AAIncDE3NzNjMjRmYmViNjQ0NGE5YjkwN2Q2NzExYzg4YWViY3AxNzY3MzA"
 const redis = new Redis({
-  url:   'https://included-shad-76730.upstash.io',
+  url: 'https://included-shad-76730.upstash.io',
   token: 'gQAAAAAAASu6AAIncDE3NzNjMjRmYmViNjQ0NGE5YjkwN2Q2NzExYzg4YWViY3AxNzY3MzA'
-});
+})
 
-/* ── Search via Deezer with corsproxy ── */
+/* ── Search via Vercel function ── */
 async function searchTracks(q) {
   if (!q.trim()) return [];
   try {
-    const res  = await fetch(
-      `https://corsproxy.io/?${encodeURIComponent(`https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=6`)}`
-    );
-    const data = await res.json();
-    return (data.data || []).map(t => ({
-      id:          String(t.id),
-      name:        t.title,
-      artist:      t.artist?.name || "",
-      album:       t.album?.title || "",
-      image:       t.album?.cover_medium || "",
-      duration_ms: (t.duration || 0) * 1000,
-      url:         t.link || "#",
-    }));
+    const res  = await fetch(`${API}?q=${encodeURIComponent(q)}`);
+    const text = await res.text();
+    if (text.trim().startsWith("<")) throw new Error("API not available");
+    const data = JSON.parse(text);
+    if (data.error) throw new Error(data.error);
+    return Array.isArray(data) ? data : [];
   } catch (e) {
     console.error("[Search] error:", e.message);
     return [];
   }
 }
 
-/* ── Load playlist from Upstash using SDK ── */
+/* ── Load playlist DIRECTLY from Upstash (CORS supported for reads) ── */
 async function loadSharedPlaylist() {
   try {
     const songs = await redis.get(PLAYLIST_KEY);
@@ -55,7 +50,7 @@ async function loadSharedPlaylist() {
   }
 }
 
-/* ── Submit queue to Upstash using SDK ── */
+/* ── Submit queue via Vercel function (server-side write to Redis) ── */
 async function submitQueue(newSongs) {
   try {
     const existing    = await redis.get(PLAYLIST_KEY) || [];
