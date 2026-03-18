@@ -336,27 +336,44 @@ export default function Hero() {
           >
             Sapphero Resorts, Shirdi
           </p>
-          <p
+          {/* <p
             className="mt-0.5 tracking-wider uppercase text-xs font-light"
             style={{ color: "var(--text-muted)", letterSpacing: "0.18em" }}
           >
             Maharashtra, India
-          </p>
+          </p> */}
         </div>
 
         {/* Summer pill */}
         <div
-          className="hero-pill mt-4 inline-flex items-center gap-2 px-5 py-2 text-xs tracking-widest rounded-full"
+          className="
+    hero-pill
+    mt-4
+    inline-flex flex-col sm:flex-row
+    items-center justify-center
+    gap-1 sm:gap-2
+    px-3 py-1.5
+    sm:px-4 sm:py-2 md:px-5
+    text-[10px] sm:text-xs md:text-sm
+    tracking-[0.15em] sm:tracking-[0.2em]
+    rounded-full
+    text-center
+    max-w-[90%] sm:max-w-fit
+  "
           style={{
             fontFamily: "'Cinzel', serif",
             background:
               "linear-gradient(135deg, rgba(232,150,30,0.15), rgba(200,150,60,0.1))",
             border: "1px solid rgba(200,150,60,0.35)",
             color: "var(--gold-dark)",
-            letterSpacing: "0.2em",
           }}
         >
-          ☀️ &nbsp; A Summer Wedding &nbsp; · &nbsp; 🕶️ Carry Your Sunglasses!
+          <span>☀️ A Summer Wedding</span>
+
+          {/* Divider only on larger screens */}
+          <span className="hidden sm:inline">&nbsp;·&nbsp;</span>
+
+          <span>🕶️ Carry Your Sunglasses!</span>
         </div>
 
         {/* CTAs */}

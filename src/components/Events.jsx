@@ -32,13 +32,13 @@ const DAY2 = [
   {
     time: "10:00", ap: "AM", icon: "🎡", colorClass: "ev-carnival",
     name: "Pink Carnival", tag: "tag-carnival", tagLabel: "Carnival · Pink Pastel Theme",
-    desc: "Start the morning in pink! A whimsical carnival gathering — games, cotton candy, photo booths, and pastel joy for the entire family. Dress code: pastel pinks only.",
+    desc: "Start the morning in pink! A whimsical carnival gathering — games, cotton candy, photo booths, and pastel joy for the entire family. Dress code: pastel pinks.",
   },
-  {
-    time: "12:00", ap: "PM", icon: "🌿", colorClass: "ev-haldi",
-    name: "Haldi Ceremony", tag: "tag-haldi", tagLabel: "Haldi · Sacred Ritual",
-    desc: "Golden turmeric and heartfelt blessings — a sacred ritual believed to bring glow, protection, and prosperity to the couple. Expect joyful colour!",
-  },
+  // {
+  //   time: "12:00", ap: "PM", icon: "🌿", colorClass: "ev-haldi",
+  //   name: "Haldi Ceremony", tag: "tag-haldi", tagLabel: "Haldi · Sacred Ritual",
+  //   desc: "Golden turmeric and heartfelt blessings — a sacred ritual believed to bring glow, protection, and prosperity to the couple. Expect joyful colour!",
+  // },
   {
     time: "4:30", ap: "PM", icon: "🐎", colorClass: "ev-baarat2",
     name: "Baarat Procession", tag: "tag-baarat", tagLabel: "Baarat · Royal Entry",
