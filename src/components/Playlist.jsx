@@ -32,26 +32,32 @@ async function redisSet(key, value) {
   } catch { /**/ }
 }
 
-/* ── Music Search via proxy (local) or direct (production) ── */
+/* ── Music Search via MusicBrainz — no CORS issues, no key needed ── */
 async function searchTracks(q) {
   if (!q.trim()) return [];
   try {
-    // Use CORS proxy for local dev, direct for production
-    const isLocal = window.location.hostname === "localhost";
-    const url = isLocal
-      ? `https://corsproxy.io/?${encodeURIComponent(`https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=6`)}`
-      : `https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=6`;
-
-    const res  = await fetch(url);
+    const res = await fetch(
+      `https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(q)}&limit=6&fmt=json`,
+      { headers: { "User-Agent": "VAWeddingApp/1.0 (wedding@example.com)" } }
+    );
     const data = await res.json();
-    return (data.data || []).map(t => ({
-      id:            String(t.id),
-      name:          t.title,
-      artists:       [{ name: t.artist?.name || "" }],
-      album:         { name: t.album?.title || "", images: [{ url: t.album?.cover_medium || "" }] },
-      duration_ms:   (t.duration || 0) * 1000,
-      external_urls: { spotify: t.link || "#" },
-    }));
+    return (data.recordings || []).map((r, i) => {
+      const artist = r["artist-credit"]?.[0]?.artist?.name || "";
+      const release = r.releases?.[0];
+      const albumName = release?.title || "";
+      const mbid = release?.id || "";
+      return {
+        id:            r.id || String(i),
+        name:          r.title,
+        artists:       [{ name: artist }],
+        album:         {
+          name: albumName,
+          images: [{ url: mbid ? `https://coverartarchive.org/release/${mbid}/front-250` : "" }],
+        },
+        duration_ms:   r.length || 0,
+        external_urls: { spotify: `https://musicbrainz.org/recording/${r.id}` },
+      };
+    });
   } catch (e) {
     console.error("[Search] error:", e.message);
     return [];
