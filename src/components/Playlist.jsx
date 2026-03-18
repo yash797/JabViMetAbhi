@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 
 const STORAGE_KEY = "va_wedding_playlist_v4";
 
-/* Single call to /api/spotify?q=... — server handles token internally */
-async function searchSpotify(q) {
+/* iTunes Search API — free, no auth, no Spotify account needed */
+async function searchTracks(q) {
   if (!q.trim()) return [];
   try {
     const res  = await fetch(`/api/spotify?q=${encodeURIComponent(q)}`);
@@ -11,7 +11,7 @@ async function searchSpotify(q) {
     if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
     return Array.isArray(data) ? data : [];
   } catch (e) {
-    console.error("[Spotify] Search error:", e.message);
+    console.error("[Search] error:", e.message);
     return [];
   }
 }
@@ -38,10 +38,13 @@ function useReveal(threshold = 0.08) {
 }
 
 /* ── sub-components ── */
-function SpotifyIcon({ size = 18, color = "#1DB954" }) {
+function MusicIcon({ size = 18, color = "var(--teal)" }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
-      <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 18V5l12-2v13"/>
+      <circle cx="6" cy="18" r="3"/>
+      <circle cx="18" cy="16" r="3"/>
     </svg>
   );
 }
@@ -163,7 +166,7 @@ export default function Playlist() {
   const doSearch = useCallback(async (q) => {
     if (!q.trim()) { setResults([]); return; }
     setSearching(true);
-    const res = await searchSpotify(q);
+    const res = await searchTracks(q);
     setResults(Array.isArray(res) ? res : []);
     setSearching(false);
   }, []);
@@ -186,7 +189,7 @@ export default function Playlist() {
       album:    t.album.name,
       image:    t.album.images?.[1]?.url || t.album.images?.[0]?.url || "",
       duration: fmt(t.duration_ms),
-      url:      t.external_urls.spotify,
+      url:      t.external_urls.spotify || t.external_urls?.appleMusic || "#",
       by:       name.trim() || "A Guest",
       at:       new Date().toLocaleDateString("en-IN", { day:"numeric", month:"short" }),
     };
@@ -317,7 +320,7 @@ export default function Playlist() {
             <input
               type="text"
               className="plSearchInp"
-              placeholder="Search Spotify — artist, song, vibe…"
+              placeholder="Search songs — artist, Bollywood, English…"
               value={query}
               onChange={handleQ}
 
@@ -334,7 +337,7 @@ export default function Playlist() {
             <div style={{ width:"7px", height:"7px", borderRadius:"50%",
               background:"#1DB954", boxShadow:"0 0 6px rgba(29,185,84,0.5)" }} />
             <span style={{ fontSize:"0.65rem", color:"var(--text-muted)" }}>
-              Connected to Spotify
+              Music search ready
             </span>
           </div>
         </div>
@@ -354,7 +357,7 @@ export default function Playlist() {
               <EqBars n={4} h={14} active color="var(--teal)" />
               <span style={{ fontFamily:"'Cinzel',serif", fontSize:"0.58rem",
                 letterSpacing:"0.22em", textTransform:"uppercase", color:"var(--teal)" }}>
-                Spotify Results
+                Song Results
               </span>
             </div>
 
@@ -396,12 +399,12 @@ export default function Playlist() {
                     {fmt(t.duration_ms)}
                   </span>
 
-                  <a href={t.external_urls.spotify} target="_blank" rel="noopener noreferrer"
+                  <a href={t.external_urls.spotify || "#"} target="_blank" rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
                     style={{ flexShrink:0, opacity:0.5, transition:"opacity .2s" }}
                     onMouseEnter={(e) => e.currentTarget.style.opacity="1"}
                     onMouseLeave={(e) => e.currentTarget.style.opacity="0.5"}>
-                    <SpotifyIcon size={17} />
+                    <MusicIcon size={17} />
                   </a>
 
                   <button onClick={() => addTrack(t)} style={{
@@ -505,7 +508,7 @@ export default function Playlist() {
                     style={{ flexShrink:0, opacity:0.4, transition:"opacity .2s" }}
                     onMouseEnter={(e) => e.currentTarget.style.opacity="0.9"}
                     onMouseLeave={(e) => e.currentTarget.style.opacity="0.4"}>
-                    <SpotifyIcon size={15} />
+                    <MusicIcon size={15} />
                   </a>
 
                   <button onClick={() => remove(s.id)} style={{
@@ -524,8 +527,8 @@ export default function Playlist() {
               <a href="https://spotify.com" target="_blank" rel="noopener noreferrer"
                 style={{ display:"inline-flex", alignItems:"center", gap:"0.4rem",
                   textDecoration:"none", fontSize:"0.7rem", color:"var(--text-muted)" }}>
-                Powered by <SpotifyIcon size={12} />
-                <span style={{ color:"#1DB954", fontWeight:600 }}>Spotify</span>
+                Powered by <MusicIcon size={12} />
+                <span style={{ color:"var(--teal)", fontWeight:600 }}>iTunes</span>
               </a>
             </div>
           </div>

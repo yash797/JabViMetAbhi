@@ -1,38 +1,5 @@
-// api/spotify.js — Vercel serverless function
-
-const https = require("https");
-
-function httpsPost(hostname, path, headers, body) {
-  return new Promise((resolve, reject) => {
-    const data = Buffer.from(body);
-    const req = https.request(
-      { hostname, path, method: "POST", headers: { ...headers, "Content-Length": data.length } },
-      (res) => {
-        let raw = "";
-        res.on("data", (c) => (raw += c));
-        res.on("end", () => resolve({ status: res.statusCode, body: raw }));
-      }
-    );
-    req.on("error", reject);
-    req.write(data);
-    req.end();
-  });
-}
-
-function httpsGet(hostname, path, headers) {
-  return new Promise((resolve, reject) => {
-    const req = https.request(
-      { hostname, path, method: "GET", headers },
-      (res) => {
-        let raw = "";
-        res.on("data", (c) => (raw += c));
-        res.on("end", () => resolve({ status: res.statusCode, body: raw }));
-      }
-    );
-    req.on("error", reject);
-    req.end();
-  });
-}
+// api/songs.js — iTunes Search API proxy
+// Free, no auth, no Spotify account needed
 
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin",  "*");
@@ -40,72 +7,41 @@ module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return res.status(204).end();
 
-  const CLIENT_ID     = process.env.SPOTIFY_CLIENT_ID;
-  const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
-
-  if (!CLIENT_ID || !CLIENT_SECRET) {
-    return res.status(500).json({ error: "Missing SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET" });
-  }
-
   const q = req.query.q;
-  if (!q) return res.status(400).json({ error: "Missing ?q= parameter" });
+  if (!q) return res.status(400).json({ error: "Missing ?q=" });
 
   try {
-    /* Step 1 — get token */
-    const creds = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64");
+    const https = require("https");
 
-    const tokenResp = await httpsPost(
-      "accounts.spotify.com",
-      "/api/token",
-      {
-        "Content-Type":  "application/x-www-form-urlencoded",
-        "Authorization": `Basic ${creds}`,
-      },
-      "grant_type=client_credentials"
-    );
+    const result = await new Promise((resolve, reject) => {
+      const path = `/search?term=${encodeURIComponent(q)}&media=music&limit=6&country=IN`;
+      const req2 = https.request(
+        { hostname: "itunes.apple.com", path, method: "GET" },
+        (r) => {
+          let raw = "";
+          r.on("data", (c) => (raw += c));
+          r.on("end", () => resolve({ status: r.statusCode, body: raw }));
+        }
+      );
+      req2.on("error", reject);
+      req2.end();
+    });
 
-    const tokenData = JSON.parse(tokenResp.body);
-    console.log("Token status:", tokenResp.status);
+    const data = JSON.parse(result.body);
 
-    if (tokenResp.status !== 200) {
-      return res.status(200).json({ 
-        error: tokenData.error_description || tokenData.error || "Token failed",
-        debug: "token_step_failed",
-        spotify_status: tokenResp.status
-      });
-    }
+    // Normalize to same shape Playlist.jsx expects
+    const tracks = (data.results || []).map((t) => ({
+      id:       String(t.trackId),
+      name:     t.trackName,
+      artists:  [{ name: t.artistName }],
+      album:    { name: t.collectionName, images: [{ url: t.artworkUrl100 }] },
+      duration_ms: t.trackTimeMillis,
+      external_urls: { spotify: t.trackViewUrl },
+      preview_url: t.previewUrl || null,
+    }));
 
-    const accessToken = tokenData.access_token;
-
-    /* Step 2 — search */
-    const searchPath = `/v1/search?q=${encodeURIComponent(q)}&type=track&limit=6`;
-    console.log("Searching:", searchPath);
-
-    const searchResp = await httpsGet(
-      "api.spotify.com",
-      searchPath,
-      { Authorization: `Bearer ${accessToken}` }
-    );
-
-    console.log("Search status:", searchResp.status);
-    console.log("Search body preview:", searchResp.body.slice(0, 200));
-
-    const searchData = JSON.parse(searchResp.body);
-
-    if (searchResp.status !== 200) {
-      // Return 200 always so browser gets JSON not Vercel error page
-      return res.status(200).json({
-        error: searchData.error?.message || "Search failed",
-        debug: "search_step_failed",
-        spotify_status: searchResp.status,
-        spotify_error: searchData.error
-      });
-    }
-
-    return res.status(200).json(searchData.tracks?.items || []);
-
+    return res.status(200).json(tracks);
   } catch (e) {
-    console.log("Exception:", e.message);
-    return res.status(200).json({ error: e.message, debug: "exception" });
+    return res.status(500).json({ error: e.message });
   }
 };
