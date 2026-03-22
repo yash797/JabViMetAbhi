@@ -8,7 +8,7 @@ const DAY1 = [
   },
   {
     time: "1:00", ap: "PM", icon: "🍽️", colorClass: "ev-lunch",
-    name: "Welcome Lunch", tag: "tag-lunch", tagLabel: "Lunch · Family Feast",
+    name: "Shahi Bhoj", tag: "tag-lunch", tagLabel: "Lunch · Family Feast",
     desc: "A joyful feast for both families — celebrate new bonds over traditional flavours and warm hospitality under the glorious Shirdi sun.",
   },
   {
