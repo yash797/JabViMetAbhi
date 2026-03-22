@@ -128,7 +128,7 @@ const DRESS = [
   { cardClass:"dc-baarat",  icon:"🎺", event:"Baarat Swagat",      dress:"Ethnic Festive",       hint:"Traditional outfit, salwar suits & sarees in warm festive tones" },
   { cardClass:"dc-mahera",  icon:"🌺", event:"Mahera Ceremony",    dress:"Traditional Indian",   hint:"Classic silks, lehengas, kurtas in earthy hues" },
   { cardClass:"dc-sangeet", icon:"🎶", event:"Sangeet & DJ Night", dress:"Cocktail Glam",        hint:"Bold colours, sequins & fusion-ethnic ensembles" },
-  { cardClass:"dc-carnival",icon:"🎡", event:"Pink Carnival",      dress:"Pink Pastels Only",    hint:"Blush, rose, baby pink, pastel lilac — fully embrace the theme!" },
+  { cardClass:"dc-carnival",icon:"🎡", event:"Carnival",      dress:"Shades of Pink",    hint:"Blush, rose, baby pink, pastel lilac — fully embrace the theme!" },
   { cardClass:"dc-wedding", icon:"💍", event:"Wedding Ceremony",   dress:"Royal Indian",         hint:"Rich silks, heavy lehengas & sherwanis." },
 ];
 
