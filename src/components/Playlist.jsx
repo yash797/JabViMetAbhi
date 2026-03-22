@@ -494,7 +494,7 @@ export default function Playlist() {
           </div>
 
           {/* View Added Songs button */}
-          <button
+           {/* <button
             onClick={loadSharedList}
             style={{
               marginTop:"1.2rem",
@@ -514,7 +514,7 @@ export default function Playlist() {
             onMouseLeave={e => { e.target.style.background="transparent"; }}
           >
             🎵 View Added Songs ({sharedSongs.length > 0 ? sharedSongs.length : "?"})
-          </button>
+          </button> */}
         </div>
 
         {/* ── SHARED LIST MODAL ── */}
