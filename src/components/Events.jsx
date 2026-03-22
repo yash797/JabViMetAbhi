@@ -6,11 +6,11 @@ const DAY1 = [
     name: "Baarat Swagat", tag: "tag-baarat", tagLabel: "Baarat · Procession",
     desc: "The groom's grand procession arrives at the resort gates, welcomed with dhol, shehnai, and the warmth of both families coming together for the very first time.",
   },
-  {
-    time: "1:00", ap: "PM", icon: "🍽️", colorClass: "ev-lunch",
-    name: "Shahi Bhoj", tag: "tag-lunch", tagLabel: "Lunch · Family Feast",
-    desc: "A joyful feast for both families — celebrate new bonds over traditional flavours and warm hospitality under the glorious Shirdi sun.",
-  },
+  //{
+    //time: "1:00", ap: "PM", icon: "🍽️", colorClass: "ev-lunch",
+   // name: "Shahi Bhoj", tag: "tag-lunch", tagLabel: "Lunch · Family Feast",
+    //desc: "A joyful feast for both families — celebrate new bonds over traditional flavours and warm hospitality under the glorious Shirdi sun.",
+  //},
   {
     time: "4:00", ap: "PM", icon: "🌺", colorClass: "ev-mahera",
     name: "Mahera Ceremony", tag: "tag-mahera", tagLabel: "Mahera · Bride's Side",
