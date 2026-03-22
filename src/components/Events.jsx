@@ -31,7 +31,7 @@ const DAY1 = [
 const DAY2 = [
   {
     time: "10:00", ap: "AM", icon: "🎡", colorClass: "ev-carnival",
-    name: "Pink Carnival", tag: "tag-carnival", tagLabel: "Carnival · Pink Pastel Theme",
+    name: "Carnival", tag: "tag-carnival", tagLabel: "Carnival · Shades of Pink Theme",
     desc: "Start the morning in pink! A whimsical carnival gathering — games, cotton candy, photo booths, and pastel joy for the entire family. Dress code: pastel pinks.",
   },
   // {
