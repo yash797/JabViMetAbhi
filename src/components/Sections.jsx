@@ -70,10 +70,21 @@ export function PeacockBand() {
         "As the peacock dances in the rain, may your love flourish through every season —
         vivid, joyful, and eternally beautiful."
       </p>
-      <p className="mt-4 text-xs tracking-widest uppercase"
-        style={{ fontFamily: "'Cinzel', serif", color: "var(--gold-light)", opacity: 0.7, letterSpacing: "0.3em" }}>
-        ✦ &nbsp; Vidhi &amp; Abhishek &nbsp; · &nbsp; Shirdi, May 2026 &nbsp; ✦
-      </p>
+      <p
+  className="mt-4 text-xs tracking-widest uppercase"
+  style={{
+    fontFamily: "'Cinzel', serif",
+    color: "var(--gold-light)",
+    opacity: 0.7,
+    letterSpacing: "0.3em",
+  }}
+>
+  ✦ &nbsp; Vidhi &amp; Abhishek &nbsp;
+  <span className="block sm:inline mt-2 sm:mt-0">
+    Shirdi, May 2026
+  </span>
+  &nbsp; ✦
+</p>
     </div>
   );
 }
