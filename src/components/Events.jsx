@@ -157,7 +157,7 @@ export default function Events() {
         <DayBlock
           badge="Day 2 · 10th May, Sunday"
           badgeStyle="linear-gradient(135deg, #D0608A, #8A2040)"
-          title="Carnival, Haldi & The Wedding"
+          title="Carnival, Baarat & The Wedding"
           date="The big day"
           events={DAY2}
           vis={vis}
