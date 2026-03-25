@@ -36,7 +36,7 @@ const DAY2 = [
   },
   {
      time: "12:00", ap: "PM", icon: "🏺", colorClass: "ev-haldi",
-     name: "Beh Ceremony", tag: "tag-haldi", tagLabel: "Haldi · Sacred Ritual",
+     name: "Beh Ceremony", tag: "tag-haldi", tagLabel: "Beh · Sacred Ritual",
      desc: "Married women carry decorated pots with songs and dance, invoking blessings and marking a joyful start to the wedding celebrations.",
    },
   {
