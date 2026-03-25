@@ -34,11 +34,11 @@ const DAY2 = [
     name: "Carnival", tag: "tag-carnival", tagLabel: "Carnival · Shades of Pink Theme",
     desc: "Start the morning in pink! A whimsical carnival gathering — games, cotton candy, photo booths, and pastel joy for the entire family. Dress code: pastel pinks.",
   },
-  // {
-  //   time: "12:00", ap: "PM", icon: "🌿", colorClass: "ev-haldi",
-  //   name: "Haldi Ceremony", tag: "tag-haldi", tagLabel: "Haldi · Sacred Ritual",
-  //   desc: "Golden turmeric and heartfelt blessings — a sacred ritual believed to bring glow, protection, and prosperity to the couple. Expect joyful colour!",
-  // },
+  {
+     time: "12:00", ap: "PM", icon: "🏺", colorClass: "ev-haldi",
+     name: "Beh Ceremony", tag: "tag-haldi", tagLabel: "Haldi · Sacred Ritual",
+     desc: "Married women carry decorated pots with songs and dance, invoking blessings and marking a joyful start to the wedding celebrations.",
+   },
   {
     time: "4:30", ap: "PM", icon: "🐎", colorClass: "ev-baarat2",
     name: "Baarat Procession", tag: "tag-baarat", tagLabel: "Baarat · Royal Entry",
