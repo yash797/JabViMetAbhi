@@ -154,8 +154,8 @@ export function DressCode() {
           <div key={d.event}
             className={`${d.cardClass} border rounded-2xl p-5 text-center hover:-translate-y-1.5 transition-transform duration-300 reveal ${vis ? `visible ${delays[i]}` : ""}`}>
             <span className="block text-3xl mb-2">{d.icon}</span>
-            <p className="font-medium" style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.05rem", color: "var(--text-dark)" }}>{d.dress}</p>
             <p className="text-xs tracking-widest uppercase mb-1" style={{ fontFamily: "'Cinzel', serif", color: "var(--text-muted)", letterSpacing: "0.18em" }}>{d.event}</p>
+            <p className="font-medium" style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.05rem", color: "var(--text-dark)" }}>{d.dress}</p>
             <p className="mt-1.5 text-xs font-light leading-snug" style={{ color: "var(--text-muted)" }}>{d.hint}</p>
           </div>
         ))}
