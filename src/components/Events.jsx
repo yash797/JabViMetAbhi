@@ -13,8 +13,8 @@ const DAY1 = [
   //},
   {
     time: "4:00", ap: "PM", icon: "🌺", colorClass: "ev-mahera",
-    name: "Mahera Ceremony", tag: "tag-mahera", tagLabel: "Mahera · Bride's Side",
-    desc: "A deeply touching tradition — the bride's maternal side showers her with gifts, blessings, and love as she prepares to step into her new life.",
+    name: "Mahera Ceremony", tag: "tag-mahera", tagLabel: "Maher",
+    desc: "A deeply touching tradition — the bride's and groom's maternal side showers them with gifts, blessings, and love as they prepares to step into their new life.",
   },
   {
     time: "7:30", ap: "PM", icon: "🎶", colorClass: "ev-sangeet",
