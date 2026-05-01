@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Redis } from '@upstash/redis'
 /* ══════════════════════════════════════════════════════════════
    PLAYLIST
    Flow:
@@ -15,13 +14,6 @@ const LOCAL_KEY     = "va_local_queue";
 const PLAYLIST_KEY  = "va_wedding_songs";
 const API           = "/api/spotify";
 
-// Upstash direct (CORS-enabled) — used for READ only
-// const UPSTASH_URL_LOAD="https://included-shad-76730.upstash.io"
-// const UPSTASH_TOKEN_LOAD="gQAAAAAAASu6AAIncDE3NzNjMjRmYmViNjQ0NGE5YjkwN2Q2NzExYzg4YWViY3AxNzY3MzA"
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN // FULL ACCESS TOKEN
-})
 
 /* ── Search via Vercel function ── */
 async function searchTracks(q) {
@@ -42,8 +34,9 @@ async function searchTracks(q) {
 /* ── Load playlist DIRECTLY from Upstash (CORS supported for reads) ── */
 async function loadSharedPlaylist() {
   try {
-    const songs = await redis.get(PLAYLIST_KEY);
-    return Array.isArray(songs) ? songs : [];
+    const res = await fetch(`${API}?action=playlist`);
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
   } catch (e) {
     console.error("[loadPlaylist] error:", e.message);
     return [];
@@ -53,13 +46,15 @@ async function loadSharedPlaylist() {
 /* ── Submit queue via Vercel function (server-side write to Redis) ── */
 async function submitQueue(newSongs) {
   try {
-    const existing    = await redis.get(PLAYLIST_KEY) || [];
-    const existingIds = new Set(existing.map(s => s.id));
-    const toAdd       = newSongs.filter(s => !existingIds.has(s.id));
-    const duplicates  = newSongs.filter(s =>  existingIds.has(s.id));
-    const updated     = [...existing, ...toAdd];
-    await redis.set(PLAYLIST_KEY, updated);
-    return { success: true, added: toAdd.length, duplicates: duplicates.length, total: updated.length };
+    const res = await fetch(`${API}?action=submit`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ songs: newSongs }),
+    });
+
+    return await res.json();
   } catch (e) {
     console.error("[submitQueue] error:", e.message);
     return { error: e.message };
