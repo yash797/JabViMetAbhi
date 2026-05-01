@@ -19,8 +19,8 @@ const API           = "/api/spotify";
 // const UPSTASH_URL_LOAD="https://included-shad-76730.upstash.io"
 // const UPSTASH_TOKEN_LOAD="gQAAAAAAASu6AAIncDE3NzNjMjRmYmViNjQ0NGE5YjkwN2Q2NzExYzg4YWViY3AxNzY3MzA"
 const redis = new Redis({
-  url: 'https://lucky-toucan-111819.upstash.io',
-  token: 'ggAAAAAAAbTLAAIgcDKFhKeD3x-XzejVlq1pEkVVEghjgC02EbdwU3HWUSmMAw'
+  url: process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN // FULL ACCESS TOKEN
 })
 
 /* ── Search via Vercel function ── */
