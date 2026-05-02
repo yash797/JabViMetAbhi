@@ -74,17 +74,17 @@ async function redisGet(key) {
 async function redisSet(key, value) {
   const u = new URL(`/set/${key}`, UPSTASH_URL);
 
-  const body = JSON.stringify(JSON.stringify(value));
+  const body = JSON.stringify(value);
 
-  const r = await httpsPost(
-    u.hostname,
-    u.pathname,
-    {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${UPSTASH_TOKEN}`,
-    },
-    body
-  );
+  await httpsPost(
+  u.hostname,
+  u.pathname,
+  {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${UPSTASH_TOKEN}`,
+  },
+  JSON.stringify(value)
+);
 
   console.log("🟡 Redis SET response:", r.body);
 
