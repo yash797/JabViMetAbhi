@@ -34,7 +34,12 @@ async function searchTracks(q) {
 /* ── Load playlist DIRECTLY from Upstash (CORS supported for reads) ── */
 async function loadSharedPlaylist() {
   try {
-    const res = await fetch(`${API}?action=playlist`);
+    const res = await fetch("/api/spotify?action=playlist");
+
+    if (!res.ok) {
+      throw new Error("Failed to load playlist");
+    }
+
     const data = await res.json();
     return Array.isArray(data) ? data : [];
   } catch (e) {
@@ -46,7 +51,7 @@ async function loadSharedPlaylist() {
 /* ── Submit queue via Vercel function (server-side write to Redis) ── */
 async function submitQueue(newSongs) {
   try {
-    const res = await fetch(`${API}?action=submit`, {
+    const res = await fetch("/api/spotify?action=submit", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -54,7 +59,13 @@ async function submitQueue(newSongs) {
       body: JSON.stringify({ songs: newSongs }),
     });
 
-    return await res.json();
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || "Submit failed");
+    }
+
+    return data;
   } catch (e) {
     console.error("[submitQueue] error:", e.message);
     return { error: e.message };

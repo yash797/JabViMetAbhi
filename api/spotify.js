@@ -1,8 +1,6 @@
-// api/spotify.js — Vercel serverless function
-
 const https = require("https");
 
-/* ───────────────────────── HELPERS ───────────────────────── */
+/* ───────────── HTTPS HELPERS ───────────── */
 
 function httpsGet(hostname, path, headers = {}) {
   return new Promise((resolve, reject) => {
@@ -22,12 +20,16 @@ function httpsGet(hostname, path, headers = {}) {
 function httpsPost(hostname, path, headers, body) {
   return new Promise((resolve, reject) => {
     const d = Buffer.from(body);
+
     const req = https.request(
       {
         hostname,
         path,
         method: "POST",
-        headers: { ...headers, "Content-Length": d.length },
+        headers: {
+          ...headers,
+          "Content-Length": d.length,
+        },
       },
       (r) => {
         let b = "";
@@ -35,16 +37,23 @@ function httpsPost(hostname, path, headers, body) {
         r.on("end", () => resolve({ status: r.statusCode, body: b }));
       }
     );
+
     req.on("error", reject);
     req.write(d);
     req.end();
   });
 }
 
-/* ───────────────────────── REDIS ───────────────────────── */
+/* ───────────── ENV ───────────── */
 
-const UPSTASH_URL   = process.env.UPSTASH_REDIS_REST_URL;
+const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
 const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+
+if (!UPSTASH_URL || !UPSTASH_TOKEN) {
+  console.error("❌ Missing Upstash env variables");
+}
+
+/* ───────────── REDIS ───────────── */
 
 async function redisGet(key) {
   const u = new URL(`/get/${key}`, UPSTASH_URL);
@@ -53,8 +62,13 @@ async function redisGet(key) {
     Authorization: `Bearer ${UPSTASH_TOKEN}`,
   });
 
-  const d = JSON.parse(r.body);
-  return d.result ? JSON.parse(d.result) : [];
+  const parsed = JSON.parse(r.body);
+
+  if (parsed.error) {
+    throw new Error(parsed.error);
+  }
+
+  return parsed.result ? JSON.parse(parsed.result) : [];
 }
 
 async function redisSet(key, value) {
@@ -62,7 +76,7 @@ async function redisSet(key, value) {
 
   const body = JSON.stringify(JSON.stringify(value));
 
-  await httpsPost(
+  const r = await httpsPost(
     u.hostname,
     u.pathname,
     {
@@ -71,24 +85,34 @@ async function redisSet(key, value) {
     },
     body
   );
+
+  console.log("🟡 Redis SET response:", r.body);
+
+  const parsed = JSON.parse(r.body);
+
+  if (parsed.error) {
+    throw new Error(parsed.error);
+  }
 }
 
-/* ───────────────────────── CONFIG ───────────────────────── */
+/* ───────────── CONFIG ───────────── */
 
 const PLAYLIST_KEY = "va_wedding_songs";
 
-/* ───────────────────────── HANDLER ───────────────────────── */
+/* ───────────── HANDLER ───────────── */
 
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
 
   const action = req.query.action;
 
-  /* ── SEARCH (Deezer) ── */
+  /* ───── SEARCH ───── */
   if (!action && req.query.q) {
     try {
       const r = await httpsGet(
@@ -110,21 +134,23 @@ module.exports = async function handler(req, res) {
 
       return res.status(200).json(tracks);
     } catch (e) {
+      console.error("Search error:", e);
       return res.status(500).json({ error: e.message });
     }
   }
 
-  /* ── GET PLAYLIST ── */
+  /* ───── GET PLAYLIST ───── */
   if (action === "playlist" && req.method === "GET") {
     try {
       const songs = await redisGet(PLAYLIST_KEY);
-      return res.status(200).json(Array.isArray(songs) ? songs : []);
+      return res.status(200).json(songs);
     } catch (e) {
+      console.error("GET playlist error:", e);
       return res.status(500).json({ error: e.message });
     }
   }
 
-  /* ── SUBMIT SONGS ── */
+  /* ───── SUBMIT ───── */
   if (action === "submit" && req.method === "POST") {
     try {
       let body = "";
@@ -134,19 +160,36 @@ module.exports = async function handler(req, res) {
         req.on("end", resolve);
       });
 
-      const { songs: newSongs } = JSON.parse(body);
+      let parsed;
+
+      try {
+        parsed = body ? JSON.parse(body) : {};
+      } catch (e) {
+        console.error("❌ JSON parse error:", e);
+        return res.status(400).json({ error: "Invalid JSON body" });
+      }
+
+      const newSongs = parsed.songs || [];
+
+      console.log("🟢 Incoming songs:", newSongs);
 
       const existing = await redisGet(PLAYLIST_KEY);
+
       const existingIds = new Set((existing || []).map((s) => s.id));
 
-      const toAdd = (newSongs || []).filter((s) => !existingIds.has(s.id));
-      const duplicates = (newSongs || []).filter((s) =>
+      const toAdd = newSongs.filter((s) => !existingIds.has(s.id));
+      const duplicates = newSongs.filter((s) =>
         existingIds.has(s.id)
       );
 
       const updated = [...(existing || []), ...toAdd];
 
+      console.log("🟡 Saving songs:", updated);
+
       await redisSet(PLAYLIST_KEY, updated);
+
+      const verify = await redisGet(PLAYLIST_KEY);
+      console.log("✅ After save:", verify);
 
       return res.status(200).json({
         success: true,
@@ -155,6 +198,7 @@ module.exports = async function handler(req, res) {
         total: updated.length,
       });
     } catch (e) {
+      console.error("🔥 SUBMIT ERROR:", e);
       return res.status(500).json({ error: e.message });
     }
   }
