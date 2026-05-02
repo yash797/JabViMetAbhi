@@ -10,7 +10,7 @@ function httpsGet(hostname, path, headers = {}) {
         let b = "";
         r.on("data", (c) => (b += c));
         r.on("end", () => resolve({ status: r.statusCode, body: b }));
-      },
+      }
     );
     req.on("error", reject);
     req.end();
@@ -35,7 +35,7 @@ function httpsPost(hostname, path, headers, body) {
         let b = "";
         r.on("data", (c) => (b += c));
         r.on("end", () => resolve({ status: r.statusCode, body: b }));
-      },
+      }
     );
 
     req.on("error", reject);
@@ -68,44 +68,51 @@ async function redisGet(key) {
     throw new Error(parsed.error);
   }
 
-  return parsed.result ? JSON.parse(parsed.result) : [];
+  let data = parsed.result;
+
+  if (!data) return [];
+
+  // 🔥 KEY FIX — always try parsing string
+  if (typeof data === "string") {
+    try {
+      data = JSON.parse(data);
+    } catch (e) {
+      console.warn("⚠️ Failed to parse string:", data);
+      return [];
+    }
+  }
+
+  // Final safety
+  if (!Array.isArray(data)) {
+    console.warn("⚠️ Unexpected Redis format:", data);
+    return [];
+  }
+
+  return data;
 }
 
-async function redisGet(key) {
-  const u = new URL(`/get/${key}`, UPSTASH_URL);
+async function redisSet(key, value) {
+  const u = new URL(`/set/${key}`, UPSTASH_URL);
 
-  const r = await httpsGet(u.hostname, u.pathname, {
-    Authorization: `Bearer ${UPSTASH_TOKEN}`,
-  });
+  const body = JSON.stringify(JSON.stringify(value));
+
+  const r = await httpsPost(
+    u.hostname,
+    u.pathname,
+    {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${UPSTASH_TOKEN}`,
+    },
+    body
+  );
+
+  console.log("🟡 Redis SET response:", r.body);
 
   const parsed = JSON.parse(r.body);
 
   if (parsed.error) {
     throw new Error(parsed.error);
   }
-
-  let data = parsed.result;
-
-  // Handle null
-  if (!data) return [];
-
-  // If it's a string → parse it
-  if (typeof data === "string") {
-    try {
-      data = JSON.parse(data);
-    } catch {
-      console.warn("⚠️ Failed to parse Redis string, resetting");
-      return [];
-    }
-  }
-
-  // Ensure it's always an array
-  if (!Array.isArray(data)) {
-    console.warn("⚠️ Redis data is not array, resetting:", data);
-    return [];
-  }
-
-  return data;
 }
 
 /* ───────────── CONFIG ───────────── */
@@ -130,7 +137,7 @@ module.exports = async function handler(req, res) {
     try {
       const r = await httpsGet(
         "api.deezer.com",
-        `/search?q=${encodeURIComponent(req.query.q)}&limit=6`,
+        `/search?q=${encodeURIComponent(req.query.q)}&limit=6`
       );
 
       const data = JSON.parse(r.body);
@@ -188,12 +195,12 @@ module.exports = async function handler(req, res) {
 
       const existing = await redisGet(PLAYLIST_KEY);
 
-      const safeExisting = Array.isArray(existing) ? existing : [];
-
-      const existingIds = new Set(safeExisting.map((s) => s.id));
+      const existingIds = new Set((existing || []).map((s) => s.id));
 
       const toAdd = newSongs.filter((s) => !existingIds.has(s.id));
-      const duplicates = newSongs.filter((s) => existingIds.has(s.id));
+      const duplicates = newSongs.filter((s) =>
+        existingIds.has(s.id)
+      );
 
       const updated = [...(existing || []), ...toAdd];
 
