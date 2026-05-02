@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+
 /* ══════════════════════════════════════════════════════════════
    PLAYLIST
    Flow:
@@ -9,20 +10,16 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
    5. Duplicate detection with toast error
    ══════════════════════════════════════════════════════════════ */
 
-// ── Keys & endpoints ─────────────────────────────────────────
-const LOCAL_KEY     = "va_local_queue";
-const PLAYLIST_KEY  = "va_wedding_songs";
-const API           = "/api/spotify";
-
+// ── Local queue storage key ───────────────────────────────────
+const LOCAL_KEY = "va_local_queue";
+const API       = "/api/spotify";
 
 /* ── Search via Vercel function ── */
 async function searchTracks(q) {
   if (!q.trim()) return [];
   try {
     const res  = await fetch(`${API}?q=${encodeURIComponent(q)}`);
-    const text = await res.text();
-    if (text.trim().startsWith("<")) throw new Error("API not available");
-    const data = JSON.parse(text);
+    const data = await res.json();
     if (data.error) throw new Error(data.error);
     return Array.isArray(data) ? data : [];
   } catch (e) {
@@ -31,43 +28,26 @@ async function searchTracks(q) {
   }
 }
 
-/* ── Load playlist DIRECTLY from Upstash (CORS supported for reads) ── */
+/* ── Load shared playlist from Redis via Vercel function ── */
 async function loadSharedPlaylist() {
   try {
-    const res = await fetch("/api/spotify?action=playlist");
-
-    if (!res.ok) {
-      throw new Error("Failed to load playlist");
-    }
-
+    const res  = await fetch(`${API}?action=playlist`);
     const data = await res.json();
     return Array.isArray(data) ? data : [];
-  } catch (e) {
-    console.error("[loadPlaylist] error:", e.message);
-    return [];
-  }
+  } catch { return []; }
 }
 
-/* ── Submit queue via Vercel function (server-side write to Redis) ── */
-async function submitQueue(newSongs) {
+/* ── Submit queue to Redis via Vercel function ── */
+async function submitQueue(songs) {
   try {
-    const res = await fetch("/api/spotify?action=submit", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ songs: newSongs }),
+    const res  = await fetch(`${API}?action=submit`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ songs }),
     });
-
     const data = await res.json();
-
-    if (!res.ok) {
-      throw new Error(data.error || "Submit failed");
-    }
-
     return data;
   } catch (e) {
-    console.error("[submitQueue] error:", e.message);
     return { error: e.message };
   }
 }
@@ -500,7 +480,7 @@ export default function Playlist() {
           </div>
 
           {/* View Added Songs button */}
-           {/* <button
+          <button
             onClick={loadSharedList}
             style={{
               marginTop:"1.2rem",
@@ -520,7 +500,7 @@ export default function Playlist() {
             onMouseLeave={e => { e.target.style.background="transparent"; }}
           >
             🎵 View Added Songs ({sharedSongs.length > 0 ? sharedSongs.length : "?"})
-          </button> */}
+          </button>
         </div>
 
         {/* ── SHARED LIST MODAL ── */}
