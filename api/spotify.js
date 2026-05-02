@@ -1,3 +1,6 @@
+// api/spotify.js — Vercel serverless function
+// Deezer search + Upstash Redis (LIST-based playlist)
+
 const https = require("https");
 
 /* ───────────── HTTPS HELPERS ───────────── */
@@ -53,48 +56,21 @@ if (!UPSTASH_URL || !UPSTASH_TOKEN) {
   console.error("❌ Missing Upstash env variables");
 }
 
-/* ───────────── REDIS ───────────── */
+/* ───────────── REDIS (LIST BASED) ───────────── */
 
-async function redisGet(key) {
-  const u = new URL(`/get/${key}`, UPSTASH_URL);
+// Add songs (append)
+async function redisAddSongs(key, songs) {
+  if (!songs.length) return;
 
-  const r = await httpsGet(u.hostname, u.pathname, {
-    Authorization: `Bearer ${UPSTASH_TOKEN}`,
-  });
+  const u = new URL(`/pipeline`, UPSTASH_URL);
 
-  const parsed = JSON.parse(r.body);
+  const commands = songs.map((song) => [
+    "RPUSH",
+    key,
+    JSON.stringify(song),
+  ]);
 
-  if (parsed.error) {
-    throw new Error(parsed.error);
-  }
-
-  let data = parsed.result;
-
-  if (!data) return [];
-
-  // 🔥 KEY FIX — always try parsing string
-  if (typeof data === "string") {
-    try {
-      data = JSON.parse(data);
-    } catch (e) {
-      console.warn("⚠️ Failed to parse string:", data);
-      return [];
-    }
-  }
-
-  // Final safety
-  if (!Array.isArray(data)) {
-    console.warn("⚠️ Unexpected Redis format:", data);
-    return [];
-  }
-
-  return data;
-}
-
-async function redisSet(key, value) {
-  const u = new URL(`/set/${key}`, UPSTASH_URL);
-
-  const body = JSON.stringify(JSON.stringify(value));
+  const body = JSON.stringify(commands);
 
   const r = await httpsPost(
     u.hostname,
@@ -106,13 +82,33 @@ async function redisSet(key, value) {
     body
   );
 
-  console.log("🟡 Redis SET response:", r.body);
+  console.log("🟡 Redis RPUSH response:", r.body);
+
+  const parsed = JSON.parse(r.body);
+  if (parsed.error) throw new Error(parsed.error);
+}
+
+// Get all songs
+async function redisGetSongs(key) {
+  const u = new URL(`/lrange/${key}/0/-1`, UPSTASH_URL);
+
+  const r = await httpsGet(u.hostname, u.pathname, {
+    Authorization: `Bearer ${UPSTASH_TOKEN}`,
+  });
 
   const parsed = JSON.parse(r.body);
 
-  if (parsed.error) {
-    throw new Error(parsed.error);
-  }
+  if (parsed.error) throw new Error(parsed.error);
+
+  return (parsed.result || [])
+    .map((item) => {
+      try {
+        return JSON.parse(item);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
 }
 
 /* ───────────── CONFIG ───────────── */
@@ -132,7 +128,7 @@ module.exports = async function handler(req, res) {
 
   const action = req.query.action;
 
-  /* ───── SEARCH ───── */
+  /* ───── SEARCH (Deezer) ───── */
   if (!action && req.query.q) {
     try {
       const r = await httpsGet(
@@ -162,7 +158,7 @@ module.exports = async function handler(req, res) {
   /* ───── GET PLAYLIST ───── */
   if (action === "playlist" && req.method === "GET") {
     try {
-      const songs = await redisGet(PLAYLIST_KEY);
+      const songs = await redisGetSongs(PLAYLIST_KEY);
       return res.status(200).json(songs);
     } catch (e) {
       console.error("GET playlist error:", e);
@@ -170,7 +166,7 @@ module.exports = async function handler(req, res) {
     }
   }
 
-  /* ───── SUBMIT ───── */
+  /* ───── SUBMIT SONGS ───── */
   if (action === "submit" && req.method === "POST") {
     try {
       let body = "";
@@ -193,29 +189,28 @@ module.exports = async function handler(req, res) {
 
       console.log("🟢 Incoming songs:", newSongs);
 
-      const existing = await redisGet(PLAYLIST_KEY);
+      // Get existing songs
+      const existing = await redisGetSongs(PLAYLIST_KEY);
+      const existingIds = new Set(existing.map((s) => s.id));
 
-      const existingIds = new Set((existing || []).map((s) => s.id));
-
+      // Filter duplicates
       const toAdd = newSongs.filter((s) => !existingIds.has(s.id));
       const duplicates = newSongs.filter((s) =>
         existingIds.has(s.id)
       );
 
-      const updated = [...(existing || []), ...toAdd];
+      console.log("🟡 Adding songs:", toAdd);
 
-      console.log("🟡 Saving songs:", updated);
+      // Append new songs
+      await redisAddSongs(PLAYLIST_KEY, toAdd);
 
-      await redisSet(PLAYLIST_KEY, updated);
-
-      const verify = await redisGet(PLAYLIST_KEY);
-      console.log("✅ After save:", verify);
+      const total = existing.length + toAdd.length;
 
       return res.status(200).json({
         success: true,
         added: toAdd.length,
         duplicates: duplicates.length,
-        total: updated.length,
+        total,
       });
     } catch (e) {
       console.error("🔥 SUBMIT ERROR:", e);
