@@ -42,7 +42,7 @@ async function redisSet(key, value) {
   const url   = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
   const u     = new URL(`/set/${key}`, url);
-  const body  = JSON.stringify(JSON.stringify(value));
+  const body  = JSON.stringify(value);
   await httpsPost(u.hostname, u.pathname, {
     "Content-Type":  "application/json",
     "Authorization": `Bearer ${token}`,
